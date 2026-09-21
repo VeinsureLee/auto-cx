@@ -20,6 +20,12 @@ test("readConfig reads the documented credential names without exposing them", (
   assert.equal(config.targetCourse, "科研诚信");
   assert.equal(config.targetLesson, "2.1 科学海洋上的高远星空");
   assert.equal(config.videoPreviewSeconds, 30);
+  assert.equal(config.progressConcurrency, 2);
+  assert.equal(config.progressPath, path.resolve("C:\\workspace", "artifacts/course-progress.json"));
+  assert.equal(
+    config.progressMarkdownPath,
+    path.resolve("C:\\workspace", "artifacts/course-progress.md"),
+  );
   assert.equal(
     config.coursesPath,
     path.resolve("C:\\workspace", "artifacts/incomplete-courses.json"),
@@ -41,6 +47,9 @@ test("readConfig accepts CHAOXING_* aliases and optional settings", () => {
     CHAOXING_TARGET_COURSE: "示例课程",
     CHAOXING_TARGET_LESSON: "3.2 示例课节",
     CHAOXING_VIDEO_PREVIEW_SECONDS: "45",
+    CHAOXING_PROGRESS_CONCURRENCY: "1",
+    CHAOXING_PROGRESS_PATH: "output/progress.json",
+    CHAOXING_PROGRESS_MARKDOWN_PATH: "output/progress.md",
   });
 
   assert.equal(config.headless, false);
@@ -50,6 +59,9 @@ test("readConfig accepts CHAOXING_* aliases and optional settings", () => {
   assert.equal(config.targetCourse, "示例课程");
   assert.equal(config.targetLesson, "3.2 示例课节");
   assert.equal(config.videoPreviewSeconds, 45);
+  assert.equal(config.progressConcurrency, 1);
+  assert.equal(config.progressPath, path.resolve("output/progress.json"));
+  assert.equal(config.progressMarkdownPath, path.resolve("output/progress.md"));
 });
 
 test("readConfig rejects missing credentials", () => {
@@ -65,6 +77,18 @@ test("readConfig validates the video preview duration", () => {
         CHAOXING_VIDEO_PREVIEW_SECONDS: "4",
       }),
     /5 到 3600/,
+  );
+});
+
+test("readConfig validates progress concurrency", () => {
+  assert.throws(
+    () =>
+      readConfig({
+        PhoneNumber: "13800138000",
+        Password: "secret",
+        CHAOXING_PROGRESS_CONCURRENCY: "5",
+      }),
+    /1 到 4/,
   );
 });
 

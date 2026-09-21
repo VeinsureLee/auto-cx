@@ -7,7 +7,8 @@
   "scripts": {
     "login": "node src/login.mjs",
     "preview:video": "node src/login.mjs --preview-video",
-    "check": "node --check src/login.mjs && node --check src/config.mjs && node --check src/courses.mjs && node --check src/course-navigation.mjs && node --check src/video-preview.mjs",
+    "progress": "node src/progress-cli.mjs",
+    "check": "node --check src/login.mjs && node --check src/progress-cli.mjs && node --check src/config.mjs && node --check src/courses.mjs && node --check src/course-progress.mjs && node --check src/course-navigation.mjs && node --check src/video-preview.mjs",
     "test": "node --test"
   },
   "engines": {

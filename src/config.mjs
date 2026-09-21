@@ -5,6 +5,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_TARGET_COURSE = "科研诚信";
 const DEFAULT_TARGET_LESSON = "2.1 科学海洋上的高远星空";
 const DEFAULT_VIDEO_PREVIEW_SECONDS = 30;
+const DEFAULT_PROGRESS_CONCURRENCY = 2;
 
 function firstNonEmpty(...values) {
   return values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
@@ -50,6 +51,18 @@ function parsePreviewSeconds(value) {
   return seconds;
 }
 
+function parseProgressConcurrency(value) {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_PROGRESS_CONCURRENCY;
+  }
+
+  const concurrency = Number(value);
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > 4) {
+    throw new Error("CHAOXING_PROGRESS_CONCURRENCY 必须是 1 到 4 之间的整数。");
+  }
+  return concurrency;
+}
+
 export function readConfig(env = process.env, cwd = process.cwd()) {
   const phone = firstNonEmpty(env.PhoneNumber, env.CHAOXING_PHONE);
   const password = firstNonEmpty(env.Password, env.CHAOXING_PASSWORD);
@@ -73,6 +86,14 @@ export function readConfig(env = process.env, cwd = process.cwd()) {
     cwd,
     firstNonEmpty(env.CHAOXING_COURSES_PATH) ?? "artifacts/incomplete-courses.json",
   );
+  const progressPath = path.resolve(
+    cwd,
+    firstNonEmpty(env.CHAOXING_PROGRESS_PATH) ?? "artifacts/course-progress.json",
+  );
+  const progressMarkdownPath = path.resolve(
+    cwd,
+    firstNonEmpty(env.CHAOXING_PROGRESS_MARKDOWN_PATH) ?? "artifacts/course-progress.md",
+  );
 
   return {
     baseUrl: baseUrl.href,
@@ -82,6 +103,9 @@ export function readConfig(env = process.env, cwd = process.cwd()) {
     headless: parseBoolean(env.CHAOXING_HEADLESS, false),
     password,
     phone,
+    progressConcurrency: parseProgressConcurrency(env.CHAOXING_PROGRESS_CONCURRENCY),
+    progressMarkdownPath,
+    progressPath,
     storageStatePath,
     targetCourse: firstNonEmpty(env.CHAOXING_TARGET_COURSE) ?? DEFAULT_TARGET_COURSE,
     targetLesson: firstNonEmpty(env.CHAOXING_TARGET_LESSON) ?? DEFAULT_TARGET_LESSON,

@@ -39,6 +39,21 @@ npm run preview:video
 
 浏览器默认保留 30 秒供人工检查，然后报告视频是否仍在播放并退出。可通过 `CHAOXING_VIDEO_PREVIEW_SECONDS` 设置 5 到 3600 秒的观察时间。预览模式不会拖动进度、自动续播、伪造页面焦点或绕过离页暂停。
 
+## 课程进度表
+
+运行以下命令会以只读方式打开课程目录，并生成已完成/未完成课节进度表：
+
+```powershell
+npm run progress
+```
+
+默认使用 `CHAOXING_PROGRESS_CONCURRENCY=2`，同时读取两门课程的目录。并发仅用于读取进度，不会播放视频。浏览器默认可见；设置 `CHAOXING_HEADLESS=true` 可隐藏浏览器。
+
+输出文件：
+
+- `artifacts/course-progress.json`：包含课程、课节、状态和待完成任务点的结构化数据；
+- `artifacts/course-progress.md`：便于直接查看的 Markdown 进度表。
+
 ## 可选设置
 
 - `CHAOXING_HEADLESS=false`：显示浏览器窗口。
@@ -50,5 +65,8 @@ npm run preview:video
 - `CHAOXING_TARGET_COURSE=...`：通过完整名称或唯一关键字选择课程。
 - `CHAOXING_TARGET_LESSON=...`：通过完整标题或唯一关键字选择课节。
 - `CHAOXING_VIDEO_PREVIEW_SECONDS=30`：设置可视化播放检查时长。
+- `CHAOXING_PROGRESS_CONCURRENCY=2`：设置只读进度采集并发数，范围为 1 到 4。
+- `CHAOXING_PROGRESS_PATH=...`：修改 JSON 进度文件路径。
+- `CHAOXING_PROGRESS_MARKDOWN_PATH=...`：修改 Markdown 进度表路径。
 
 `.env`、`.auth/`、`artifacts/` 和依赖目录都已加入 `.gitignore`。程序不会输出手机号、密码或 Cookie；若平台要求验证码，程序会停止并提示人工处理，不会尝试绕过。
