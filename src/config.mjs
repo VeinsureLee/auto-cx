@@ -6,6 +6,8 @@ const DEFAULT_TARGET_COURSE = "科研诚信";
 const DEFAULT_TARGET_LESSON = "2.1 科学海洋上的高远星空";
 const DEFAULT_VIDEO_PREVIEW_SECONDS = 30;
 const DEFAULT_PROGRESS_CONCURRENCY = 2;
+const DEFAULT_LLM_MODEL = "deepseek-chat";
+const DEFAULT_LLM_BASE_URL = "https://api.deepseek.com";
 
 function firstNonEmpty(...values) {
   return values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
@@ -63,20 +65,41 @@ function parseProgressConcurrency(value) {
   return concurrency;
 }
 
-export function readConfig(env = process.env, cwd = process.cwd()) {
+function parseList(value) {
+  if (value === undefined || value === null || value === "") {
+    return [];
+  }
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseHttpUrl(value, fallback, label) {
+  const url = new URL(firstNonEmpty(value) ?? fallback);
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error(`${label} 必须使用 http 或 https 协议。`);
+  }
+  return url.href;
+}
+
+export function readConfig(env = process.env, cwd = process.cwd(), options = {}) {
+  const requireCredentials = options.requireCredentials !== false;
   const phone = firstNonEmpty(env.PhoneNumber, env.CHAOXING_PHONE);
   const password = firstNonEmpty(env.Password, env.CHAOXING_PASSWORD);
 
-  if (!phone || !password) {
+  if (requireCredentials && (!phone || !password)) {
     throw new Error(
       "缺少登录凭据。请设置 PhoneNumber 和 Password（也兼容 CHAOXING_PHONE、CHAOXING_PASSWORD）。",
     );
   }
 
-  const baseUrl = new URL(firstNonEmpty(env.CHAOXING_BASE_URL) ?? DEFAULT_BASE_URL);
-  if (!["http:", "https:"].includes(baseUrl.protocol)) {
-    throw new Error("CHAOXING_BASE_URL 必须使用 http 或 https 协议。");
-  }
+  const baseUrl = parseHttpUrl(env.CHAOXING_BASE_URL, DEFAULT_BASE_URL, "CHAOXING_BASE_URL");
+  const llmBaseUrl = parseHttpUrl(
+    env.CHAOXING_LLM_BASE_URL,
+    DEFAULT_LLM_BASE_URL,
+    "CHAOXING_LLM_BASE_URL",
+  );
 
   const storageStatePath = path.resolve(
     cwd,
@@ -94,19 +117,33 @@ export function readConfig(env = process.env, cwd = process.cwd()) {
     cwd,
     firstNonEmpty(env.CHAOXING_PROGRESS_MARKDOWN_PATH) ?? "artifacts/course-progress.md",
   );
+  const studyReportPath = path.resolve(
+    cwd,
+    firstNonEmpty(env.CHAOXING_STUDY_REPORT_PATH) ?? "artifacts/study-report.json",
+  );
+  const studyReportMarkdownPath = path.resolve(
+    cwd,
+    firstNonEmpty(env.CHAOXING_STUDY_REPORT_MARKDOWN_PATH) ?? "artifacts/study-report.md",
+  );
 
   return {
-    baseUrl: baseUrl.href,
+    baseUrl,
     browserChannel: firstNonEmpty(env.CHAOXING_BROWSER_CHANNEL) ?? "chrome",
     browserPath: firstNonEmpty(env.CHAOXING_BROWSER_PATH),
     coursesPath,
+    deepseekApiKey: firstNonEmpty(env.CHAOXING_DEEPSEEK_API_KEY, env.DEEPSEEK_API_KEY),
     headless: parseBoolean(env.CHAOXING_HEADLESS, false),
+    llmBaseUrl,
+    llmModel: firstNonEmpty(env.CHAOXING_LLM_MODEL) ?? DEFAULT_LLM_MODEL,
     password,
     phone,
     progressConcurrency: parseProgressConcurrency(env.CHAOXING_PROGRESS_CONCURRENCY),
     progressMarkdownPath,
     progressPath,
     storageStatePath,
+    studyCourses: parseList(env.CHAOXING_STUDY_COURSES),
+    studyReportMarkdownPath,
+    studyReportPath,
     targetCourse: firstNonEmpty(env.CHAOXING_TARGET_COURSE) ?? DEFAULT_TARGET_COURSE,
     targetLesson: firstNonEmpty(env.CHAOXING_TARGET_LESSON) ?? DEFAULT_TARGET_LESSON,
     timeoutMs: parseTimeout(env.CHAOXING_TIMEOUT_MS),

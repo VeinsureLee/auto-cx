@@ -64,6 +64,72 @@ test("readConfig accepts CHAOXING_* aliases and optional settings", () => {
   assert.equal(config.progressMarkdownPath, path.resolve("output/progress.md"));
 });
 
+test("readConfig reads the auto-study settings with defaults", () => {
+  const config = readConfig(
+    { PhoneNumber: "13800138000", Password: "secret" },
+    "C:\\workspace",
+  );
+
+  assert.equal(config.deepseekApiKey, undefined);
+  assert.equal(config.llmModel, "deepseek-chat");
+  assert.equal(config.llmBaseUrl, "https://api.deepseek.com/");
+  assert.equal(config.studyReportPath, path.resolve("C:\\workspace", "artifacts/study-report.json"));
+  assert.equal(
+    config.studyReportMarkdownPath,
+    path.resolve("C:\\workspace", "artifacts/study-report.md"),
+  );
+});
+
+test("readConfig supports the DeepSeek key aliases and custom study paths", () => {
+  const config = readConfig(
+    {
+      CHAOXING_PHONE: "13800138000",
+      CHAOXING_PASSWORD: "secret",
+      CHAOXING_DEEPSEEK_API_KEY: "sk-test",
+      CHAOXING_LLM_MODEL: "deepseek-reasoner",
+      CHAOXING_LLM_BASE_URL: "https://api.deepseek.com/v1",
+      CHAOXING_STUDY_REPORT_PATH: "output/study.json",
+      CHAOXING_STUDY_REPORT_MARKDOWN_PATH: "output/study.md",
+    },
+    "C:\\workspace",
+  );
+
+  assert.equal(config.deepseekApiKey, "sk-test");
+  assert.equal(config.llmModel, "deepseek-reasoner");
+  assert.equal(config.llmBaseUrl, "https://api.deepseek.com/v1");
+  assert.equal(config.studyReportPath, path.resolve("C:\\workspace", "output/study.json"));
+  assert.equal(config.studyReportMarkdownPath, path.resolve("C:\\workspace", "output/study.md"));
+});
+
+test("readConfig falls back to the bare DEEPSEEK_API_KEY name", () => {
+  const config = readConfig({
+    DEEPSEEK_API_KEY: "sk-bare",
+    CHAOXING_PHONE: "13800138000",
+    CHAOXING_PASSWORD: "secret",
+  });
+
+  assert.equal(config.deepseekApiKey, "sk-bare");
+});
+
+test("readConfig validates the LLM base URL protocol", () => {
+  assert.throws(
+    () =>
+      readConfig({
+        CHAOXING_LLM_BASE_URL: "ftp://api.deepseek.com",
+        CHAOXING_PHONE: "13800138000",
+        CHAOXING_PASSWORD: "secret",
+      }),
+    /http 或 https/,
+  );
+});
+
+test("readConfig with requireCredentials false skips the credential check", () => {
+  const config = readConfig({}, "C:\\workspace", { requireCredentials: false });
+  assert.equal(config.phone, undefined);
+  assert.equal(config.password, undefined);
+  assert.ok(config.storageStatePath);
+});
+
 test("readConfig rejects missing credentials", () => {
   assert.throws(() => readConfig({}), /缺少登录凭据/);
 });
