@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Browser automation for signing in to the BUPT Chaoxing course platform.",
+  "description": "Browser automation for signing in to the BUPT Chaoxing course platform and entering the user space.",
   "scripts": {
     "login": "node src/login.mjs",
     "check": "node --check src/login.mjs && node --check src/config.mjs",

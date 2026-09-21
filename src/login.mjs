@@ -12,6 +12,8 @@ const LOGIN_BUTTON = "#id-login";
 const PHONE_INPUT = "#default_phone";
 const PASSWORD_INPUT = "#default_password";
 const SUBMIT_BUTTON = "#loginBtn";
+const USER_MENU = "#logined";
+const SPACE_ENTRY = "#user-space-index";
 const LOGIN_RESPONSE_PATH = /\/entry\/login\/(?:phoneAndCxhLogin|phoneAndCxhLoginVal)$/;
 
 function cleanServerMessage(value) {
@@ -57,7 +59,22 @@ async function verifyAuthenticatedHome(page, baseUrl, timeoutMs) {
   return page.evaluate(() => window.isLogin === true);
 }
 
-async function login() {
+async function enterSpace(page, timeoutMs) {
+  const userMenu = page.locator(USER_MENU);
+  const spaceEntry = page.locator(SPACE_ENTRY);
+
+  await spaceEntry.waitFor({ state: "attached", timeout: timeoutMs });
+  await userMenu.hover();
+  await spaceEntry.waitFor({ state: "visible", timeout: timeoutMs });
+  await spaceEntry.click();
+  await page.waitForURL(
+    (url) => url.hostname === "i.chaoxing.com" && url.pathname.startsWith("/base"),
+    { timeout: timeoutMs },
+  );
+  await page.waitForLoadState("domcontentloaded", { timeout: timeoutMs });
+}
+
+async function loginAndEnterSpace() {
   const config = readConfig();
   const browser = await launchBrowser(config);
 
@@ -123,15 +140,18 @@ async function login() {
       throw new Error(`${responseDetail}，且平台首页没有确认登录状态；未保存会话。请检查账号绑定状态。`);
     }
 
+    console.log("登录成功，正在进入个人空间……");
+    await enterSpace(page, config.timeoutMs);
+
     await mkdir(path.dirname(config.storageStatePath), { recursive: true });
     await context.storageState({ path: config.storageStatePath });
-    console.log(`登录成功，会话已保存到 ${path.relative(process.cwd(), config.storageStatePath)}。`);
+    console.log(`已进入个人空间，会话已保存到 ${path.relative(process.cwd(), config.storageStatePath)}。`);
   } finally {
     await browser.close();
   }
 }
 
-login().catch((error) => {
-  console.error(`自动登录未完成：${error.message}`);
+loginAndEnterSpace().catch((error) => {
+  console.error(`自动登录或进入空间未完成：${error.message}`);
   process.exitCode = 1;
 });

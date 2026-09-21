@@ -1,6 +1,6 @@
 # 超星平台登录自动化
 
-使用 Playwright 驱动本机 Chrome，自动打开北京邮电大学研究生院课程平台，点击登录按钮并使用环境变量中的手机号和密码登录。
+使用 Playwright 驱动本机 Chrome，自动打开北京邮电大学研究生院课程平台，点击登录按钮并使用环境变量中的手机号和密码登录，然后从用户菜单进入超星个人空间。
 
 ## 使用方法
 
@@ -18,7 +18,7 @@
    npm run login
    ```
 
-登录成功后，浏览器会话保存在 `.auth/chaoxing-storage-state.json`，供后续学习脚本复用。
+登录成功并进入 `https://i.chaoxing.com/base` 后，浏览器会话保存在 `.auth/chaoxing-storage-state.json`，供后续学习脚本复用。
 
 ## 可选设置
 
