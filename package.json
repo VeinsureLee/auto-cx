@@ -1,0 +1,19 @@
+{
+  "name": "chaoxing-learning-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser automation for signing in to the BUPT Chaoxing course platform.",
+  "scripts": {
+    "login": "node src/login.mjs",
+    "check": "node --check src/login.mjs && node --check src/config.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.1",
+    "playwright-core": "^1.63.0"
+  }
+}
