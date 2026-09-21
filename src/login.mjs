@@ -1,10 +1,11 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { config as loadDotenv } from "dotenv";
 import { chromium } from "playwright-core";
 
 import { readConfig } from "./config.mjs";
+import { getIncompleteCourses } from "./courses.mjs";
 
 loadDotenv({ quiet: true });
 
@@ -143,9 +144,22 @@ async function loginAndEnterSpace() {
     console.log("登录成功，正在进入个人空间……");
     await enterSpace(page, config.timeoutMs);
 
+    const courses = await getIncompleteCourses(page, config.timeoutMs);
+    await mkdir(path.dirname(config.coursesPath), { recursive: true });
+    await writeFile(config.coursesPath, `${JSON.stringify(courses, null, 2)}\n`, "utf8");
+
     await mkdir(path.dirname(config.storageStatePath), { recursive: true });
     await context.storageState({ path: config.storageStatePath });
-    console.log(`已进入个人空间，会话已保存到 ${path.relative(process.cwd(), config.storageStatePath)}。`);
+    console.log(`已获取 ${courses.length} 门未完成课程：`);
+    for (const course of courses) {
+      const progress =
+        course.progress.completed === null || course.progress.total === null
+          ? "暂无任务点进度"
+          : `${course.progress.completed}/${course.progress.total}`;
+      console.log(`- ${course.name}（${progress}）`);
+    }
+    console.log(`课程列表已保存到 ${path.relative(process.cwd(), config.coursesPath)}。`);
+    console.log(`会话已保存到 ${path.relative(process.cwd(), config.storageStatePath)}。`);
   } finally {
     await browser.close();
   }

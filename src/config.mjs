@@ -54,11 +54,16 @@ export function readConfig(env = process.env, cwd = process.cwd()) {
     cwd,
     firstNonEmpty(env.CHAOXING_STORAGE_STATE) ?? ".auth/chaoxing-storage-state.json",
   );
+  const coursesPath = path.resolve(
+    cwd,
+    firstNonEmpty(env.CHAOXING_COURSES_PATH) ?? "artifacts/incomplete-courses.json",
+  );
 
   return {
     baseUrl: baseUrl.href,
     browserChannel: firstNonEmpty(env.CHAOXING_BROWSER_CHANNEL) ?? "chrome",
     browserPath: firstNonEmpty(env.CHAOXING_BROWSER_PATH),
+    coursesPath,
     headless: parseBoolean(env.CHAOXING_HEADLESS, true),
     password,
     phone,
