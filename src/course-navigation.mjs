@@ -137,5 +137,8 @@ export async function openTargetLesson({
     "课节内容",
   );
 
-  return { lessonTitle: lesson.title };
+  return {
+    coursePage,
+    lessonTitle: lesson.title,
+  };
 }

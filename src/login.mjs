@@ -7,6 +7,7 @@ import { chromium } from "playwright-core";
 import { readConfig } from "./config.mjs";
 import { openTargetLesson, selectTargetCourse } from "./course-navigation.mjs";
 import { getIncompleteCourses } from "./courses.mjs";
+import { readVideoState, startVideoPreview } from "./video-preview.mjs";
 
 loadDotenv({ quiet: true });
 
@@ -25,8 +26,8 @@ function cleanServerMessage(value) {
   return value.replace(/[\r\n\t]+/g, " ").trim().slice(0, 200) || "平台未返回可读的错误信息";
 }
 
-async function launchBrowser(config) {
-  const launchOptions = { headless: config.headless };
+async function launchBrowser(config, forceHeaded = false) {
+  const launchOptions = { headless: forceHeaded ? false : config.headless };
   if (config.browserPath) {
     launchOptions.executablePath = config.browserPath;
   } else {
@@ -78,7 +79,8 @@ async function enterSpace(page, timeoutMs) {
 
 async function loginAndEnterSpace() {
   const config = readConfig();
-  const browser = await launchBrowser(config);
+  const previewVideo = process.argv.includes("--preview-video");
+  const browser = await launchBrowser(config, previewVideo);
 
   try {
     const context = await browser.newContext({
@@ -159,6 +161,19 @@ async function loginAndEnterSpace() {
       timeoutMs: config.timeoutMs,
     });
 
+    let initialVideoState = null;
+    let finalVideoState = null;
+    if (previewVideo) {
+      console.log("正在点击视频播放按钮……");
+      const preview = await startVideoPreview(openedLesson.coursePage, config.timeoutMs);
+      initialVideoState = preview.initialState;
+      console.log(
+        `视频已开始播放，将保持可见窗口 ${config.videoPreviewSeconds} 秒供检查。`,
+      );
+      await openedLesson.coursePage.waitForTimeout(config.videoPreviewSeconds * 1_000);
+      finalVideoState = await readVideoState(preview.frame);
+    }
+
     await mkdir(path.dirname(config.storageStatePath), { recursive: true });
     await context.storageState({ path: config.storageStatePath });
     console.log(`已获取 ${courses.length} 门未完成课程：`);
@@ -170,6 +185,18 @@ async function loginAndEnterSpace() {
       console.log(`- ${course.name}（${progress}）`);
     }
     console.log(`已打开课节：${openedLesson.lessonTitle}`);
+    if (initialVideoState && finalVideoState) {
+      const advancedSeconds = Math.max(
+        0,
+        Number((finalVideoState.currentTime - initialVideoState.currentTime).toFixed(2)),
+      );
+      console.log(
+        `视频检查结束：实际推进 ${advancedSeconds} 秒，当前 ${finalVideoState.currentTime} 秒，${finalVideoState.paused ? "已暂停" : "仍在播放"}。`,
+      );
+      if (finalVideoState.paused && !finalVideoState.ended) {
+        console.log("平台已自动暂停视频；预览程序未尝试绕过该机制。");
+      }
+    }
     console.log(`课程列表已保存到 ${path.relative(process.cwd(), config.coursesPath)}。`);
     console.log(`会话已保存到 ${path.relative(process.cwd(), config.storageStatePath)}。`);
   } finally {

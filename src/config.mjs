@@ -4,6 +4,7 @@ const DEFAULT_BASE_URL = "https://buptgrs.fanya.chaoxing.com/";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_TARGET_COURSE = "科研诚信";
 const DEFAULT_TARGET_LESSON = "2.1 科学海洋上的高远星空";
+const DEFAULT_VIDEO_PREVIEW_SECONDS = 30;
 
 function firstNonEmpty(...values) {
   return values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
@@ -37,6 +38,18 @@ function parseTimeout(value) {
   return timeoutMs;
 }
 
+function parsePreviewSeconds(value) {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_VIDEO_PREVIEW_SECONDS;
+  }
+
+  const seconds = Number(value);
+  if (!Number.isSafeInteger(seconds) || seconds < 5 || seconds > 3_600) {
+    throw new Error("CHAOXING_VIDEO_PREVIEW_SECONDS 必须是 5 到 3600 之间的整数。");
+  }
+  return seconds;
+}
+
 export function readConfig(env = process.env, cwd = process.cwd()) {
   const phone = firstNonEmpty(env.PhoneNumber, env.CHAOXING_PHONE);
   const password = firstNonEmpty(env.Password, env.CHAOXING_PASSWORD);
@@ -66,12 +79,13 @@ export function readConfig(env = process.env, cwd = process.cwd()) {
     browserChannel: firstNonEmpty(env.CHAOXING_BROWSER_CHANNEL) ?? "chrome",
     browserPath: firstNonEmpty(env.CHAOXING_BROWSER_PATH),
     coursesPath,
-    headless: parseBoolean(env.CHAOXING_HEADLESS, true),
+    headless: parseBoolean(env.CHAOXING_HEADLESS, false),
     password,
     phone,
     storageStatePath,
     targetCourse: firstNonEmpty(env.CHAOXING_TARGET_COURSE) ?? DEFAULT_TARGET_COURSE,
     targetLesson: firstNonEmpty(env.CHAOXING_TARGET_LESSON) ?? DEFAULT_TARGET_LESSON,
     timeoutMs: parseTimeout(env.CHAOXING_TIMEOUT_MS),
+    videoPreviewSeconds: parsePreviewSeconds(env.CHAOXING_VIDEO_PREVIEW_SECONDS),
   };
 }
