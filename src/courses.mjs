@@ -1,7 +1,7 @@
 const COURSE_LIST = "#courseList";
 const COURSE_ITEM = `${COURSE_LIST} .course.learnCourse`;
 
-async function findCourseFrame(page, timeoutMs) {
+export async function findCourseFrame(page, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {

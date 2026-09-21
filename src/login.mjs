@@ -5,6 +5,7 @@ import { config as loadDotenv } from "dotenv";
 import { chromium } from "playwright-core";
 
 import { readConfig } from "./config.mjs";
+import { openTargetLesson, selectTargetCourse } from "./course-navigation.mjs";
 import { getIncompleteCourses } from "./courses.mjs";
 
 loadDotenv({ quiet: true });
@@ -148,6 +149,16 @@ async function loginAndEnterSpace() {
     await mkdir(path.dirname(config.coursesPath), { recursive: true });
     await writeFile(config.coursesPath, `${JSON.stringify(courses, null, 2)}\n`, "utf8");
 
+    const targetCourse = selectTargetCourse(courses, config.targetCourse);
+    console.log(`正在打开课程：${targetCourse.name}`);
+    const openedLesson = await openTargetLesson({
+      context,
+      course: targetCourse,
+      lessonTitle: config.targetLesson,
+      page,
+      timeoutMs: config.timeoutMs,
+    });
+
     await mkdir(path.dirname(config.storageStatePath), { recursive: true });
     await context.storageState({ path: config.storageStatePath });
     console.log(`已获取 ${courses.length} 门未完成课程：`);
@@ -158,6 +169,7 @@ async function loginAndEnterSpace() {
           : `${course.progress.completed}/${course.progress.total}`;
       console.log(`- ${course.name}（${progress}）`);
     }
+    console.log(`已打开课节：${openedLesson.lessonTitle}`);
     console.log(`课程列表已保存到 ${path.relative(process.cwd(), config.coursesPath)}。`);
     console.log(`会话已保存到 ${path.relative(process.cwd(), config.storageStatePath)}。`);
   } finally {

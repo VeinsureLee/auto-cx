@@ -2,6 +2,8 @@ import path from "node:path";
 
 const DEFAULT_BASE_URL = "https://buptgrs.fanya.chaoxing.com/";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TARGET_COURSE = "科研诚信";
+const DEFAULT_TARGET_LESSON = "2.1 科学海洋上的高远星空";
 
 function firstNonEmpty(...values) {
   return values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
@@ -68,6 +70,8 @@ export function readConfig(env = process.env, cwd = process.cwd()) {
     password,
     phone,
     storageStatePath,
+    targetCourse: firstNonEmpty(env.CHAOXING_TARGET_COURSE) ?? DEFAULT_TARGET_COURSE,
+    targetLesson: firstNonEmpty(env.CHAOXING_TARGET_LESSON) ?? DEFAULT_TARGET_LESSON,
     timeoutMs: parseTimeout(env.CHAOXING_TIMEOUT_MS),
   };
 }
