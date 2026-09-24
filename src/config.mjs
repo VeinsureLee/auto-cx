@@ -8,6 +8,8 @@ const DEFAULT_VIDEO_PREVIEW_SECONDS = 30;
 const DEFAULT_PROGRESS_CONCURRENCY = 2;
 const DEFAULT_LLM_MODEL = "deepseek-chat";
 const DEFAULT_LLM_BASE_URL = "https://api.deepseek.com";
+const DEFAULT_VIDEO_TARGET_PERCENT = 95;
+const DEFAULT_VIDEO_RETRY_LIMIT = 3;
 
 function firstNonEmpty(...values) {
   return values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
@@ -63,6 +65,18 @@ function parseProgressConcurrency(value) {
     throw new Error("CHAOXING_PROGRESS_CONCURRENCY 必须是 1 到 4 之间的整数。");
   }
   return concurrency;
+}
+
+function parseIntegerInRange(value, fallback, minimum, maximum, label) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new Error(`${label} 必须是 ${minimum} 到 ${maximum} 之间的整数。`);
+  }
+  return parsed;
 }
 
 function parseList(value) {
@@ -125,6 +139,14 @@ export function readConfig(env = process.env, cwd = process.cwd(), options = {})
     cwd,
     firstNonEmpty(env.CHAOXING_STUDY_REPORT_MARKDOWN_PATH) ?? "artifacts/study-report.md",
   );
+  const studyMemoPath = path.resolve(
+    cwd,
+    firstNonEmpty(env.CHAOXING_STUDY_MEMO_PATH) ?? "artifacts/study-memo.json",
+  );
+  const studyMemoMarkdownPath = path.resolve(
+    cwd,
+    firstNonEmpty(env.CHAOXING_STUDY_MEMO_MARKDOWN_PATH) ?? "artifacts/study-memo.md",
+  );
 
   return {
     baseUrl,
@@ -134,6 +156,7 @@ export function readConfig(env = process.env, cwd = process.cwd(), options = {})
     deepseekApiKey: firstNonEmpty(env.CHAOXING_DEEPSEEK_API_KEY, env.DEEPSEEK_API_KEY),
     headless: parseBoolean(env.CHAOXING_HEADLESS, false),
     llmBaseUrl,
+    noSandbox: parseBoolean(env.CHAOXING_NO_SANDBOX, false),
     llmModel: firstNonEmpty(env.CHAOXING_LLM_MODEL) ?? DEFAULT_LLM_MODEL,
     password,
     phone,
@@ -142,11 +165,27 @@ export function readConfig(env = process.env, cwd = process.cwd(), options = {})
     progressPath,
     storageStatePath,
     studyCourses: parseList(env.CHAOXING_STUDY_COURSES),
+    studyMemoMarkdownPath,
+    studyMemoPath,
     studyReportMarkdownPath,
     studyReportPath,
     targetCourse: firstNonEmpty(env.CHAOXING_TARGET_COURSE) ?? DEFAULT_TARGET_COURSE,
     targetLesson: firstNonEmpty(env.CHAOXING_TARGET_LESSON) ?? DEFAULT_TARGET_LESSON,
     timeoutMs: parseTimeout(env.CHAOXING_TIMEOUT_MS),
     videoPreviewSeconds: parsePreviewSeconds(env.CHAOXING_VIDEO_PREVIEW_SECONDS),
+    videoRetryLimit: parseIntegerInRange(
+      env.CHAOXING_VIDEO_RETRY_LIMIT,
+      DEFAULT_VIDEO_RETRY_LIMIT,
+      1,
+      10,
+      "CHAOXING_VIDEO_RETRY_LIMIT",
+    ),
+    videoTargetPercent: parseIntegerInRange(
+      env.CHAOXING_VIDEO_TARGET_PERCENT,
+      DEFAULT_VIDEO_TARGET_PERCENT,
+      1,
+      100,
+      "CHAOXING_VIDEO_TARGET_PERCENT",
+    ),
   };
 }

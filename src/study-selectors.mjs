@@ -7,6 +7,10 @@ export const STUDY_SELECTORS = {
   lessonItem: ".chapter_item:has(.catalog_name.newCatalog_name a.clicktitle)",
   lessonLink: ".catalog_name.newCatalog_name a.clicktitle",
 
+  // 课节内容与任务标签。任务发现、恢复定位均限定在 cards iframe 内。
+  cardsFramePath: "/mooc-ans/knowledge/cards",
+  taskTab: 'li[id^="dct"]',
+
   // 任务点模块帧路径识别（URL pathname 包含即视为该类型）
   moduleFrames: [
     { type: "video", path: "/ananas/modules/video/index.html" },
@@ -17,32 +21,45 @@ export const STUDY_SELECTORS = {
     { type: "other", path: "/ananas/modules/insertimage/" },
   ],
 
-  // 前进到下一个任务点的候选策略（按顺序尝试）
-  taskPointList: ["#task-list li", ".taskPointList li"],
-  nextButton: [
-    ".nextBtn",
-    ".nextbutton",
-    "#nextBtn",
-    'button:has-text("下一任务")',
-    'button:has-text("下一节")',
-    'button:has-text("下一步")',
-    'a:has-text("下一任务")',
-    'a:has-text("下一节")',
-  ],
+  // 内联章节测验（作业）容器（出现在课程主帧，切换任务点标签时可见/隐藏）
+  inlineQuiz: ".RightCon.newTestCon, #form1:has(.TiMu.newTiMu)",
 
-  // 文档等任务点可点的“已完成/记已学”按钮
-  markViewedButton: [".finishStudy", 'button:has-text("已完成")', 'a:has-text("已完成")'],
+  // 视频播放中弹出的内嵌测验（video quiz）
+  videoQuiz: {
+    overlay: ".tkTopic_con",
+    item: ".tkTopic_con .tkItem",
+    itemTitle: ".tkItem_title",
+    optionItem: ".tkItem_ul li.ans-videoquiz-opt",
+    optionInput: 'input[type="radio"]',
+    submitButton: "#videoquiz-submit",
+    continueButton: "#videoquiz-continue",
+    correctMark: "#spanHas",
+    wrongMark: "#spanNot",
+    wrongBackMark: "#spanNotBack",
+    resultMarks: ["#spanHas", "#spanNotBack", "#spanNot"],
+    maxAttempts: 3,
+  },
 
-  // 章节测验（作业）页面
+  // 章节测验（作业）页面（基于真实 DOM：.RightCon.newTestCon）
   quiz: {
-    questionBlock: ".TiMu",
+    questionBlock: ".TiMu.newTiMu",
+    qTypeAttr: "data", // 0=单选 1=多选 2=填空 3=判断 4=简答
     stem: ".Zy_TItle",
-    optionItem: ".answerBg li",
-    optionItemAlt: ".answerList li",
+    stemLabel: ".newZy_TItle",
+    stemText: "p",
+    optionItem: "ul.Zy_ulTop li[qid]",
+    optionMark: ".num_option",
+    optionDataAttr: "data",
     fillInput: 'input[type="text"], input[type="number"], input[type="tel"]',
     essayTextarea: "textarea",
-    submitButton: ".btnSub, .submitBtn",
+    submitButton: ".btnSubmit, .btnSub, .submitBtn",
+    confirmButton: "#confirmSubWin a.bluebtn, #confirmSubWin .bluebtn, #popok",
+    captchaWindow: "#verifyCodeWin",
+    captchaInput: "#inputCode",
     successMark: ".fl.endTip",
     successText: "提交成功",
+    completedMark: ".fl.endTip, .mark_answer, .viewAnswer, .scoreDiv",
+    completedText: /提交成功|已完成|查看答案|我的得分/,
+    pendingText: /待完成|提交作业|提交答案/,
   },
 };

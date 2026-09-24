@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { filterCoursesByQuery } from "../src/study.mjs";
+import { filterCoursesByQuery, pickNextLesson } from "../src/study.mjs";
 
 const courses = [
   { courseId: "1", name: "创新创业基础" },
@@ -41,4 +41,80 @@ test("filterCoursesByQuery supports comma-separated style queries", () => {
     filterCoursesByQuery(courses, ["科研诚信, 创新创业实战"]).map((course) => course.courseId),
     ["2", "3"],
   );
+});
+
+function catalog(knowledgeId, { completed = false, locked = false } = {}) {
+  return {
+    knowledgeId,
+    completed,
+    progressText: locked ? "需完成之前闯关任务点，该章节才能解锁" : "2个待完成任务点",
+  };
+}
+
+function memoLesson(knowledgeId, { catalogCompleted = false, video = "pending", homework = "pending" } = {}) {
+  return {
+    knowledgeId,
+    catalogCompleted,
+    locked: false,
+    video: { status: video },
+    homework: { status: homework },
+  };
+}
+
+test("pickNextLesson picks the first incomplete, unlocked lesson needing work", () => {
+  const catalogLessons = [catalog("a", { completed: true }), catalog("b"), catalog("c")];
+  const memoLessons = [
+    memoLesson("a", { catalogCompleted: true }),
+    memoLesson("b"),
+    memoLesson("c"),
+  ];
+  const target = pickNextLesson(catalogLessons, memoLessons, new Set(), null);
+  assert.equal(target.knowledgeId, "b");
+});
+
+test("pickNextLesson skips locked lessons and already-attempted lessons", () => {
+  const catalogLessons = [catalog("a"), catalog("b", { locked: true }), catalog("c")];
+  const memoLessons = [memoLesson("a"), memoLesson("b"), memoLesson("c")];
+  const target = pickNextLesson(catalogLessons, memoLessons, new Set(["a"]), null);
+  assert.equal(target.knowledgeId, "c");
+});
+
+test("pickNextLesson skips lessons whose memo is already done", () => {
+  const catalogLessons = [catalog("a"), catalog("b")];
+  const memoLessons = [
+    memoLesson("a", { video: "done", homework: "submitted" }),
+    memoLesson("b"),
+  ];
+  const target = pickNextLesson(catalogLessons, memoLessons, new Set(), null);
+  assert.equal(target.knowledgeId, "b");
+});
+
+test("pickNextLesson respects the video-only phase", () => {
+  const catalogLessons = [catalog("a"), catalog("b")];
+  const memoLessons = [
+    memoLesson("a", { video: "done", homework: "pending" }),
+    memoLesson("b", { video: "pending", homework: "submitted" }),
+  ];
+  const target = pickNextLesson(catalogLessons, memoLessons, new Set(), "video");
+  assert.equal(target.knowledgeId, "b");
+});
+
+test("pickNextLesson respects the homework-only phase", () => {
+  const catalogLessons = [catalog("a"), catalog("b")];
+  const memoLessons = [
+    memoLesson("a", { video: "pending", homework: "submitted" }),
+    memoLesson("b", { video: "done", homework: "pending" }),
+  ];
+  const target = pickNextLesson(catalogLessons, memoLessons, new Set(), "homework");
+  assert.equal(target.knowledgeId, "b");
+});
+
+test("pickNextLesson submits dry_run lessons on a real run", () => {
+  const catalogLessons = [catalog("a"), catalog("b")];
+  const memoLessons = [
+    memoLesson("a", { video: "done", homework: "dry_run" }),
+    memoLesson("b", { video: "done", homework: "pending" }),
+  ];
+  const target = pickNextLesson(catalogLessons, memoLessons, new Set(), "homework", false);
+  assert.equal(target.knowledgeId, "a");
 });

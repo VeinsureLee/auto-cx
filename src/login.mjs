@@ -33,6 +33,9 @@ async function launchBrowser(config, forceHeaded = false) {
   } else {
     launchOptions.channel = config.browserChannel;
   }
+  if (config.noSandbox) {
+    launchOptions.chromiumSandbox = false;
+  }
 
   return chromium.launch(launchOptions);
 }
@@ -151,29 +154,7 @@ async function loginAndEnterSpace() {
     await mkdir(path.dirname(config.coursesPath), { recursive: true });
     await writeFile(config.coursesPath, `${JSON.stringify(courses, null, 2)}\n`, "utf8");
 
-    const targetCourse = selectTargetCourse(courses, config.targetCourse);
-    console.log(`正在打开课程：${targetCourse.name}`);
-    const openedLesson = await openTargetLesson({
-      context,
-      course: targetCourse,
-      lessonTitle: config.targetLesson,
-      page,
-      timeoutMs: config.timeoutMs,
-    });
-
-    let initialVideoState = null;
-    let finalVideoState = null;
-    if (previewVideo) {
-      console.log("正在点击视频播放按钮……");
-      const preview = await startVideoPreview(openedLesson.coursePage, config.timeoutMs);
-      initialVideoState = preview.initialState;
-      console.log(
-        `视频已开始播放，将保持可见窗口 ${config.videoPreviewSeconds} 秒供检查。`,
-      );
-      await openedLesson.coursePage.waitForTimeout(config.videoPreviewSeconds * 1_000);
-      finalVideoState = await readVideoState(preview.frame);
-    }
-
+    // 先保存会话与课程列表；后面的“打开目标课节”仅用于人工核对，失败不阻断后续学习。
     await mkdir(path.dirname(config.storageStatePath), { recursive: true });
     await context.storageState({ path: config.storageStatePath });
     console.log(`已获取 ${courses.length} 门未完成课程：`);
@@ -184,7 +165,40 @@ async function loginAndEnterSpace() {
           : `${course.progress.completed}/${course.progress.total}`;
       console.log(`- ${course.name}（${progress}）`);
     }
-    console.log(`已打开课节：${openedLesson.lessonTitle}`);
+    console.log(`课程列表已保存到 ${path.relative(process.cwd(), config.coursesPath)}。`);
+    console.log(`会话已保存到 ${path.relative(process.cwd(), config.storageStatePath)}。`);
+
+    let openedLesson = null;
+    try {
+      const targetCourse = selectTargetCourse(courses, config.targetCourse);
+      console.log(`正在打开课程：${targetCourse.name}`);
+      openedLesson = await openTargetLesson({
+        context,
+        course: targetCourse,
+        lessonTitle: config.targetLesson,
+        page,
+        timeoutMs: config.timeoutMs,
+      });
+    } catch (error) {
+      console.warn(`打开目标课节失败（不影响后续自动学习）：${error.message}`);
+    }
+
+    let initialVideoState = null;
+    let finalVideoState = null;
+    if (previewVideo && openedLesson) {
+      console.log("正在点击视频播放按钮……");
+      const preview = await startVideoPreview(openedLesson.coursePage, config.timeoutMs);
+      initialVideoState = preview.initialState;
+      console.log(
+        `视频已开始播放，将保持可见窗口 ${config.videoPreviewSeconds} 秒供检查。`,
+      );
+      await openedLesson.coursePage.waitForTimeout(config.videoPreviewSeconds * 1_000);
+      finalVideoState = await readVideoState(preview.frame);
+    }
+
+    if (openedLesson) {
+      console.log(`已打开课节：${openedLesson.lessonTitle}`);
+    }
     if (initialVideoState && finalVideoState) {
       const advancedSeconds = Math.max(
         0,
@@ -197,8 +211,6 @@ async function loginAndEnterSpace() {
         console.log("平台已自动暂停视频；预览程序未尝试绕过该机制。");
       }
     }
-    console.log(`课程列表已保存到 ${path.relative(process.cwd(), config.coursesPath)}。`);
-    console.log(`会话已保存到 ${path.relative(process.cwd(), config.storageStatePath)}。`);
   } finally {
     await browser.close();
   }

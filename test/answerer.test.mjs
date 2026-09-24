@@ -77,6 +77,19 @@ test("normalizeAnswer validates and shapes each answer type", () => {
   assert.equal(normalizeAnswer({ index: 1, type: "unknown" }), null);
 });
 
+test("buildPrompt renders both string and object-style options", () => {
+  const prompt = buildPrompt([
+    { type: "single", stem: "单选题题干", options: [{ data: "A", text: "选项甲" }, { data: "B", text: "选项乙" }] },
+    { type: "judge", stem: "判断题题干", options: [{ data: "true", text: "对" }, { data: "false", text: "错" }] },
+  ]);
+
+  assert.ok(prompt.includes("1. 选项甲"));
+  assert.ok(prompt.includes("2. 选项乙"));
+  assert.ok(prompt.includes("1. 对"));
+  assert.ok(prompt.includes("2. 错"));
+  assert.ok(!prompt.includes("[object Object]"));
+});
+
 test("decideVideoEnded treats ended or near-duration as finished", () => {
   assert.equal(decideVideoEnded({ ended: true, currentTime: 10, duration: 10 }), true);
   assert.equal(decideVideoEnded({ ended: false, currentTime: 9.6, duration: 10 }), true);

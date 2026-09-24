@@ -78,6 +78,16 @@ test("readConfig reads the auto-study settings with defaults", () => {
     config.studyReportMarkdownPath,
     path.resolve("C:\\workspace", "artifacts/study-report.md"),
   );
+  assert.equal(
+    config.studyMemoPath,
+    path.resolve("C:\\workspace", "artifacts/study-memo.json"),
+  );
+  assert.equal(
+    config.studyMemoMarkdownPath,
+    path.resolve("C:\\workspace", "artifacts/study-memo.md"),
+  );
+  assert.equal(config.videoTargetPercent, 95);
+  assert.equal(config.videoRetryLimit, 3);
 });
 
 test("readConfig supports the DeepSeek key aliases and custom study paths", () => {
@@ -90,6 +100,10 @@ test("readConfig supports the DeepSeek key aliases and custom study paths", () =
       CHAOXING_LLM_BASE_URL: "https://api.deepseek.com/v1",
       CHAOXING_STUDY_REPORT_PATH: "output/study.json",
       CHAOXING_STUDY_REPORT_MARKDOWN_PATH: "output/study.md",
+      CHAOXING_STUDY_MEMO_PATH: "output/study-memo.json",
+      CHAOXING_STUDY_MEMO_MARKDOWN_PATH: "output/study-memo.md",
+      CHAOXING_VIDEO_TARGET_PERCENT: "90",
+      CHAOXING_VIDEO_RETRY_LIMIT: "4",
     },
     "C:\\workspace",
   );
@@ -99,6 +113,10 @@ test("readConfig supports the DeepSeek key aliases and custom study paths", () =
   assert.equal(config.llmBaseUrl, "https://api.deepseek.com/v1");
   assert.equal(config.studyReportPath, path.resolve("C:\\workspace", "output/study.json"));
   assert.equal(config.studyReportMarkdownPath, path.resolve("C:\\workspace", "output/study.md"));
+  assert.equal(config.studyMemoPath, path.resolve("C:\\workspace", "output/study-memo.json"));
+  assert.equal(config.studyMemoMarkdownPath, path.resolve("C:\\workspace", "output/study-memo.md"));
+  assert.equal(config.videoTargetPercent, 90);
+  assert.equal(config.videoRetryLimit, 4);
 });
 
 test("readConfig falls back to the bare DEEPSEEK_API_KEY name", () => {
@@ -158,8 +176,43 @@ test("readConfig validates progress concurrency", () => {
   );
 });
 
+test("readConfig reads the no-sandbox flag for root environments", () => {
+  assert.equal(
+    readConfig({ PhoneNumber: "13800138000", Password: "secret" }, "C:\\workspace").noSandbox,
+    false,
+  );
+  assert.equal(
+    readConfig(
+      { PhoneNumber: "13800138000", Password: "secret", CHAOXING_NO_SANDBOX: "true" },
+      "C:\\workspace",
+    ).noSandbox,
+    true,
+  );
+});
+
 test("parseBoolean validates input", () => {
   assert.equal(parseBoolean("yes", false), true);
   assert.equal(parseBoolean("0", true), false);
   assert.throws(() => parseBoolean("sometimes", true), /布尔环境变量/);
+});
+
+test("readConfig validates the video target and retry limit", () => {
+  assert.throws(
+    () =>
+      readConfig({
+        PhoneNumber: "13800138000",
+        Password: "secret",
+        CHAOXING_VIDEO_TARGET_PERCENT: "101",
+      }),
+    /VIDEO_TARGET_PERCENT/,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        PhoneNumber: "13800138000",
+        Password: "secret",
+        CHAOXING_VIDEO_RETRY_LIMIT: "0",
+      }),
+    /VIDEO_RETRY_LIMIT/,
+  );
 });

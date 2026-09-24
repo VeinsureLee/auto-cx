@@ -1,6 +1,3 @@
-import { STUDY_SELECTORS } from "./study-selectors.mjs";
-import { handleQuizWork } from "./quiz.mjs";
-
 const MEDIA_STALL_TIMEOUT_MS = 60_000;
 const MEDIA_POLL_INTERVAL_MS = 1_500;
 const MEDIA_PROGRESS_EPSILON_SECONDS = 0.05;
@@ -18,6 +15,32 @@ export function decideVideoEnded(state) {
   return false;
 }
 
+export function mediaTargetSeconds(duration, targetPercent = 100) {
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return null;
+  }
+  const ratio = targetPercent >= 1 ? targetPercent / 100 : targetPercent;
+  if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
+    throw new Error(`媒体目标比例无效：${targetPercent}`);
+  }
+  return Number((duration * ratio).toFixed(2));
+}
+
+export function hasReachedMediaTarget(state, targetPercent = 100) {
+  if (!state || !Number.isFinite(state.currentTime)) {
+    return false;
+  }
+  const target = mediaTargetSeconds(state.duration, targetPercent);
+  if (target === null) {
+    return false;
+  }
+  const ratio = targetPercent >= 1 ? targetPercent / 100 : targetPercent;
+  if (ratio >= 1) {
+    return decideVideoEnded(state);
+  }
+  return state.currentTime >= target;
+}
+
 export async function readMediaState(frame, mediaType = "video") {
   const media = frame.locator(mediaType).first();
   if ((await media.count()) === 0) {
@@ -32,52 +55,27 @@ export async function readMediaState(frame, mediaType = "video") {
   }));
 }
 
-function frameModuleType(frame) {
-  let pathname;
-  try {
-    pathname = new URL(frame.url()).pathname;
-  } catch {
-    return null;
-  }
-  for (const candidate of STUDY_SELECTORS.moduleFrames) {
-    if (pathname.includes(candidate.path)) {
-      return candidate.type;
-    }
-  }
-  return null;
-}
-
-export async function detectTaskPointFrame(page) {
-  const matches = [];
-  for (const frame of page.frames()) {
-    const type = frameModuleType(frame);
-    if (type) {
-      matches.push({ frame, type });
-    }
-  }
-  if (matches.length === 0) {
-    return null;
-  }
-
-  // 多个模块帧同时存在时，优先取可见者；否则取最后一个。
-  for (const match of matches) {
-    const element = await match.frame.frameElement().catch(() => null);
-    if (element && (await element.isVisible().catch(() => false))) {
-      return match;
-    }
-  }
-  return matches[matches.length - 1];
-}
-
-export async function waitForMediaEnd(frame, mediaType, metadataTimeoutMs, options = {}) {
+export async function waitForMediaTarget(frame, mediaType, metadataTimeoutMs, options = {}) {
   const now = options.now ?? Date.now;
   const pollIntervalMs = options.pollIntervalMs ?? MEDIA_POLL_INTERVAL_MS;
   const stallTimeoutMs = options.stallTimeoutMs ?? MEDIA_STALL_TIMEOUT_MS;
+  const targetPercent = options.targetPercent ?? 100;
   const metadataDeadline = now() + metadataTimeoutMs;
   let lastCurrentTime = null;
   let lastProgressAt = now();
 
   while (true) {
+    // 处理视频播放中弹出的内嵌测验等：处理完成后重置进度计时，继续等待播放。
+    if (typeof options.onTick === "function") {
+      const handled = await options.onTick();
+      if (handled) {
+        lastCurrentTime = null;
+        lastProgressAt = now();
+        await frame.waitForTimeout(pollIntervalMs);
+        continue;
+      }
+    }
+
     const state = await readMediaState(frame, mediaType);
     const sampledAt = now();
     if (state === null || !state.duration || state.duration <= 0) {
@@ -87,8 +85,12 @@ export async function waitForMediaEnd(frame, mediaType, metadataTimeoutMs, optio
       await frame.waitForTimeout(Math.min(1_000, pollIntervalMs));
       continue;
     }
-    if (decideVideoEnded(state)) {
-      return { status: "watched", state };
+    const targetSeconds = mediaTargetSeconds(state.duration, targetPercent);
+    if (typeof options.onSample === "function") {
+      await options.onSample(state, { targetSeconds });
+    }
+    if (hasReachedMediaTarget(state, targetPercent)) {
+      return { status: "reached_target", state, targetSeconds };
     }
 
     const progressed =
@@ -117,124 +119,37 @@ export async function waitForMediaEnd(frame, mediaType, metadataTimeoutMs, optio
   }
 }
 
-export async function waitForMediaReady(frame, mediaType) {
+export async function waitForMediaEnd(frame, mediaType, metadataTimeoutMs, options = {}) {
+  const result = await waitForMediaTarget(frame, mediaType, metadataTimeoutMs, {
+    ...options,
+    targetPercent: 100,
+  });
+  if (result.status === "reached_target") {
+    return { status: "watched", state: result.state };
+  }
+  return result;
+}
+
+export async function waitForMediaReady(frame, mediaType, timeoutMs = 15_000) {
   const media = frame.locator(mediaType).first();
-  await media.waitFor({ state: "attached", timeout: 15_000 });
+  await media.waitFor({ state: "attached", timeout: timeoutMs });
 }
 
-function moduleFrameSignature(page) {
-  return page
-    .frames()
-    .filter((frame) => frameModuleType(frame) !== null)
-    .map((frame) => frame.url())
-    .sort()
-    .join("|");
-}
+export async function startMediaPlayback(frame, mediaType = "video") {
+  await waitForMediaReady(frame, mediaType);
+  const media = frame.locator(mediaType).first();
 
-async function waitForModuleChange(page, previousSignature, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (moduleFrameSignature(page) !== previousSignature) {
-      return true;
-    }
-    await page.waitForTimeout(500);
-  }
-  return false;
-}
-
-async function clickNextTaskPoint(page) {
-  // 策略一：任务点列表，点击当前激活项的下一个兄弟
-  for (const selector of STUDY_SELECTORS.taskPointList) {
-    const items = page.locator(selector);
-    const count = await items.count().catch(() => 0);
-    for (let index = 0; index < count; index += 1) {
-      const item = items.nth(index);
-      const active = await item
-        .evaluate((element) => {
-          const className = element.getAttribute("class") ?? "";
-          return (
-            element.classList.contains("active") ||
-            element.classList.contains("cur") ||
-            className.includes("active")
-          );
-        })
-        .catch(() => false);
-      if (active) {
-        const next = items.nth(index + 1);
-        if ((await next.count()) > 0) {
-          await next.scrollIntoViewIfNeeded();
-          await next.click();
-          return { method: `task-list:${selector}` };
-        }
-      }
+  if (mediaType === "video") {
+    const playButton = frame
+      .locator(".vjs-big-play-button, button[title='播放视频'], .vjs-play-control.vjs-paused")
+      .first();
+    if ((await playButton.count()) > 0 && (await playButton.isVisible().catch(() => false))) {
+      await playButton.click().catch(() => null);
     }
   }
 
-  // 策略二：点击“下一任务/下一节”按钮
-  for (const selector of STUDY_SELECTORS.nextButton) {
-    const button = page.locator(selector).first();
-    if ((await button.count()) > 0 && (await button.isVisible().catch(() => false))) {
-      await button.scrollIntoViewIfNeeded();
-      await button.click();
-      return { method: `next-button:${selector}` };
-    }
+  const state = await readMediaState(frame, mediaType);
+  if (!state || state.paused) {
+    await media.evaluate((element) => element.play?.().catch(() => {})).catch(() => {});
   }
-
-  return null;
-}
-
-export async function advanceTaskPoint(page, timeoutMs = 15_000) {
-  const previousSignature = moduleFrameSignature(page);
-  const advanced = await clickNextTaskPoint(page);
-  if (advanced === null) {
-    throw new Error(
-      "无法定位“下一个任务点”控件，请在首次真实运行后调整 src/study-selectors.mjs 的 STUDY_SELECTORS。",
-    );
-  }
-  const changed = await waitForModuleChange(page, previousSignature, timeoutMs);
-  return { ...advanced, changed };
-}
-
-export async function processTaskPoint({ page, taskPoint, config, dryRun }) {
-  const { type, frame } = taskPoint;
-
-  if (type === "video" || type === "audio") {
-    const mediaType = type;
-    await waitForMediaReady(frame, mediaType);
-    const media = frame.locator(mediaType).first();
-
-    if (mediaType === "video") {
-      const playButton = frame
-        .locator(".vjs-big-play-button, button[title='播放视频'], .vjs-play-control.vjs-paused")
-        .first();
-      if ((await playButton.count()) > 0 && (await playButton.isVisible().catch(() => false))) {
-        await playButton.click().catch(() => {});
-      } else {
-        await media.evaluate((element) => element.play?.().catch(() => {})).catch(() => {});
-      }
-    } else {
-      await media.evaluate((element) => element.play?.().catch(() => {})).catch(() => {});
-    }
-
-    const result = await waitForMediaEnd(frame, mediaType, config.timeoutMs);
-    return { type, ...result };
-  }
-
-  if (type === "quiz") {
-    const result = await handleQuizWork({ frame, config, dryRun });
-    return { type, ...result };
-  }
-
-  if (type === "doc" || type === "other") {
-    for (const selector of STUDY_SELECTORS.markViewedButton) {
-      const button = frame.locator(selector).first();
-      if ((await button.count()) > 0 && (await button.isVisible().catch(() => false))) {
-        await button.click().catch(() => {});
-        return { type, status: "viewed", detail: `已点击 ${selector}` };
-      }
-    }
-    return { type, status: "skipped", detail: `${type} 任务点，未找到“已完成”按钮` };
-  }
-
-  return { type, status: "skipped", detail: `未知任务点类型 ${type}` };
 }

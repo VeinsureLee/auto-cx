@@ -18,7 +18,11 @@ export function buildPrompt(questions) {
     lines.push(
       `${index + 1}. [${question.type}] ${question.stem}`,
       ...(question.options?.length
-        ? question.options.map((option, optionIndex) => `   ${optionIndex + 1}. ${option}`)
+        ? question.options.map((option, optionIndex) => {
+            const optionText =
+              typeof option === "string" ? option : option?.text ?? String(option?.data ?? "");
+            return `   ${optionIndex + 1}. ${optionText}`;
+          })
         : ["   （无选项，需填写）"]),
     );
   });
@@ -93,7 +97,8 @@ export async function callChatCompletions(prompt, config) {
   const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${config.llmBaseUrl}/chat/completions`, {
+    const endpoint = `${config.llmBaseUrl.replace(/\/+$/, "")}/chat/completions`;
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${config.deepseekApiKey}`,

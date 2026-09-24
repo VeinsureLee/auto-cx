@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { renderStudyReportMarkdown } from "../src/study-cli.mjs";
+import { collectPhaseArg, renderStudyReportMarkdown } from "../src/study-cli.mjs";
 
 const sampleReport = {
   dryRun: true,
@@ -13,18 +13,17 @@ const sampleReport = {
       lessons: [
         {
           title: "1.1 创新目标",
-          status: "completed",
-          detail: "已推进到下一课节",
-          taskPoints: [
-            { type: "video", status: "watched" },
-            { type: "quiz", status: "dry-run", detail: "已填入 2/2 题答案，未提交" },
-          ],
+          status: "done",
+          detail: null,
+          video: { status: "done", lastError: null },
+          homework: { status: "dry_run", lastError: null },
         },
         {
           title: "1.2 被锁定",
-          status: "skipped",
-          detail: "被“闯关”锁定",
-          taskPoints: [],
+          status: "locked",
+          detail: "被闯关锁定",
+          video: { status: "pending", lastError: null },
+          homework: { status: "pending", lastError: null },
         },
       ],
     },
@@ -35,12 +34,25 @@ test("renderStudyReportMarkdown renders a readable per-lesson table", () => {
   const output = renderStudyReportMarkdown(sampleReport);
 
   assert.ok(output.includes("# 超星自动学习报告"));
-  assert.ok(output.includes("演练（dry-run，只作答不提交）"));
+  assert.ok(output.includes("演练（dry-run，章节作业只填答不提交）"));
   assert.ok(output.includes("## 创新创业基础"));
   assert.ok(output.includes("1.1 创新目标"));
-  assert.ok(output.includes("video:watched"));
-  assert.ok(output.includes("quiz:dry-run(已填入 2/2 题答案，未提交)"));
+  assert.ok(output.includes("done"));
+  assert.ok(output.includes("dry_run"));
   assert.ok(output.includes("1.2 被锁定"));
+  assert.ok(output.includes("被闯关锁定"));
+});
+
+test("collectPhaseArg accepts only video or homework phases", () => {
+  assert.equal(collectPhaseArg(["node", "study-cli.mjs"]), null);
+  assert.equal(collectPhaseArg(["node", "study-cli.mjs", "--phase", "video"]), "video");
+  assert.equal(collectPhaseArg(["node", "study-cli.mjs", "--phase", "homework"]), "homework");
+  assert.throws(() => collectPhaseArg(["--phase"]), /需要一个值/);
+  assert.throws(() => collectPhaseArg(["--phase", "assessment"]), /目前支持 video 或 homework/);
+  assert.throws(
+    () => collectPhaseArg(["--phase", "video", "--phase", "video"]),
+    /只能指定一次/,
+  );
 });
 
 test("renderStudyReportMarkdown escapes pipes inside cells", () => {
@@ -51,7 +63,15 @@ test("renderStudyReportMarkdown escapes pipes inside cells", () => {
       {
         courseId: "1",
         name: "课程",
-        lessons: [{ title: "含|竖线", status: "error", detail: "错误|说明", taskPoints: [] }],
+        lessons: [
+          {
+            title: "含|竖线",
+            status: "failed",
+            detail: "错误|说明",
+            video: { status: "failed", lastError: "错|误" },
+            homework: { status: "pending", lastError: null },
+          },
+        ],
       },
     ],
   };
