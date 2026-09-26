@@ -5,8 +5,8 @@ import { config as loadDotenv } from "dotenv";
 import { chromium } from "playwright-core";
 
 import { readConfig } from "./config.mjs";
-import { openTargetLesson, selectTargetCourse } from "./course-navigation.mjs";
-import { getIncompleteCourses } from "./courses.mjs";
+import { openTargetLesson, selectTargetCourse } from "./platform/course-navigation.mjs";
+import { getIncompleteCourses } from "./platform/courses.mjs";
 import { readVideoState, startVideoPreview } from "./video-preview.mjs";
 
 loadDotenv({ quiet: true });

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { escapeMarkdownCell } from "./course-progress.mjs";
+import { escapeMarkdownCell } from "./persistence/progress-format.mjs";
 
 export const STUDY_MEMO_SCHEMA_VERSION = 1;
 

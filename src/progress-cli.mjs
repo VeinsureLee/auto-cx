@@ -5,10 +5,8 @@ import { config as loadDotenv } from "dotenv";
 import { chromium } from "playwright-core";
 
 import { readConfig } from "./config.mjs";
-import {
-  collectProgressWithConcurrency,
-  renderProgressMarkdown,
-} from "./course-progress.mjs";
+import { collectProgressWithConcurrency } from "./platform/course-progress.mjs";
+import { renderProgressMarkdown } from "./persistence/progress-format.mjs";
 
 loadDotenv({ quiet: true });
 
