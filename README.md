@@ -164,3 +164,14 @@ CHAOXING_DEEPSEEK_API_KEY=sk-你的key
 - `CHAOXING_STUDY_COURSES=创新创业`：只学习名称包含该关键字的课程（逗号分隔多个）。
 
 `.env`、`.auth/`、`artifacts/` 和依赖目录都已加入 `.gitignore`。程序不会输出手机号、密码或 Cookie；若平台要求验证码，程序会停止并提示人工处理，不会尝试绕过。
+
+## 代码结构（维护者）
+
+- `src/platform/`：超星页面选择器、课程/课节导航、任务点发现与状态读取；浏览器 `evaluateAll` 回调必须自包含，不得引用 Node.js 模块作用域变量。
+- `src/assessment/`：章节题目读取和提交、视频弹题、DeepSeek 请求与答案解析。
+- `src/video/`：媒体播放状态、视频任务和预览。
+- `src/learning/`：课节内作业→视频流程、并发调度、浏览器页面生命周期与终端进度。
+- `src/persistence/`：备忘录、报告及 Markdown 格式化；`src/shared/` 存放无平台依赖的课节筛选逻辑。
+- 根目录的 `src/login.mjs`、`src/progress-cli.mjs`、`src/study-cli.mjs` 是命令入口；其余保留的根目录同名模块是兼容导出路径。新内部代码应导入各领域下的实际实现，不从兼容入口反向依赖。
+
+修改页面抓取时，请在 `test/` 中增补离线 DOM 或隔离页面回调测试，并运行 `npm test`、`npm run check`。这两项检查不会登录或操作真实课程。
