@@ -88,6 +88,21 @@ export function collectPhaseArg(argv) {
   return value;
 }
 
+export function collectConcurrencyArg(argv, fallback = 1) {
+  const indexes = argv
+    .map((value, index) => (value === "--concurrency" ? index : -1))
+    .filter((index) => index >= 0);
+  if (indexes.length === 0) return fallback;
+  if (indexes.length > 1) throw new Error("--concurrency 只能指定一次。");
+  const value = argv[indexes[0] + 1];
+  if (!value || value.startsWith("--")) throw new Error("--concurrency 需要一个值。");
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 3) {
+    throw new Error("--concurrency 必须是 1 到 3 之间的整数。");
+  }
+  return parsed;
+}
+
 export async function writeStudyReport(report, config) {
   await mkdir(path.dirname(config.studyReportPath), { recursive: true });
   await mkdir(path.dirname(config.studyReportMarkdownPath), { recursive: true });
@@ -105,6 +120,7 @@ async function main() {
   const lessonArgs = collectLessonArgs(process.argv);
   const phase = collectPhaseArg(process.argv);
   const config = readConfig(process.env, process.cwd(), { requireCredentials: false });
+  const concurrency = collectConcurrencyArg(process.argv, config.studyConcurrency);
   const coursesQuery = courseArgs.length ? courseArgs : config.studyCourses;
   const lessonsQuery = lessonArgs.length ? lessonArgs : null;
 
@@ -123,8 +139,9 @@ async function main() {
           ? "自动学习（演练模式）：视频照常播放；章节作业只填入答案，不提交。"
           : "自动学习（全自动模式）：逐课节看完视频，再做该课节作业。",
   );
+  console.log(`课节并发数：${concurrency}`);
 
-  const report = await runStudy({ dryRun, phase, config, coursesQuery, lessonsQuery });
+  const report = await runStudy({ dryRun, phase, config, coursesQuery, lessonsQuery, concurrency });
   await writeStudyReport(report, config);
 
   for (const course of report.courses) {

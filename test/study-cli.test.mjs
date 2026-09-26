@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { collectPhaseArg, renderStudyReportMarkdown } from "../src/study-cli.mjs";
+import {
+  collectConcurrencyArg,
+  collectPhaseArg,
+  renderStudyReportMarkdown,
+} from "../src/study-cli.mjs";
 
 const sampleReport = {
   dryRun: true,
@@ -51,6 +55,22 @@ test("collectPhaseArg accepts only video or homework phases", () => {
   assert.throws(() => collectPhaseArg(["--phase", "assessment"]), /目前支持 video 或 homework/);
   assert.throws(
     () => collectPhaseArg(["--phase", "video", "--phase", "video"]),
+    /只能指定一次/,
+  );
+});
+
+test("collectConcurrencyArg uses the configured fallback and accepts one through three", () => {
+  assert.equal(collectConcurrencyArg(["node", "study-cli.mjs"], 1), 1);
+  assert.equal(collectConcurrencyArg(["--concurrency", "1"], 3), 1);
+  assert.equal(collectConcurrencyArg(["--concurrency", "3"], 1), 3);
+});
+
+test("collectConcurrencyArg rejects missing, repeated, and invalid values", () => {
+  assert.throws(() => collectConcurrencyArg(["--concurrency"], 1), /需要一个值/);
+  assert.throws(() => collectConcurrencyArg(["--concurrency", "2.5"], 1), /1 到 3/);
+  assert.throws(() => collectConcurrencyArg(["--concurrency", "4"], 1), /1 到 3/);
+  assert.throws(
+    () => collectConcurrencyArg(["--concurrency", "2", "--concurrency", "3"], 1),
     /只能指定一次/,
   );
 });

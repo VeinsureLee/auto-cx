@@ -217,6 +217,31 @@ test("readConfig validates the video target and retry limit", () => {
   );
 });
 
+test("readConfig defaults study concurrency to one", () => {
+  const config = readConfig({}, "C:\\workspace", { requireCredentials: false });
+  assert.equal(config.studyConcurrency, 1);
+});
+
+test("readConfig accepts study concurrency up to three", () => {
+  const config = readConfig(
+    { CHAOXING_STUDY_CONCURRENCY: "3" },
+    "C:\\workspace",
+    { requireCredentials: false },
+  );
+  assert.equal(config.studyConcurrency, 3);
+});
+
+test("readConfig rejects study concurrency outside one through three", () => {
+  assert.throws(
+    () => readConfig({ CHAOXING_STUDY_CONCURRENCY: "0" }, process.cwd(), { requireCredentials: false }),
+    /CHAOXING_STUDY_CONCURRENCY 必须是 1 到 3/,
+  );
+  assert.throws(
+    () => readConfig({ CHAOXING_STUDY_CONCURRENCY: "4" }, process.cwd(), { requireCredentials: false }),
+    /CHAOXING_STUDY_CONCURRENCY 必须是 1 到 3/,
+  );
+});
+
 test("readConfig reads the video speed with a 2x default", () => {
   assert.equal(
     readConfig({ PhoneNumber: "13800138000", Password: "secret" }, "C:\\workspace").videoSpeed,

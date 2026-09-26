@@ -6,6 +6,7 @@ const DEFAULT_TARGET_COURSE = "科研诚信";
 const DEFAULT_TARGET_LESSON = "2.1 科学海洋上的高远星空";
 const DEFAULT_VIDEO_PREVIEW_SECONDS = 30;
 const DEFAULT_PROGRESS_CONCURRENCY = 2;
+const DEFAULT_STUDY_CONCURRENCY = 1;
 const DEFAULT_LLM_MODEL = "deepseek-chat";
 const DEFAULT_LLM_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_VIDEO_TARGET_PERCENT = 95;
@@ -178,6 +179,13 @@ export function readConfig(env = process.env, cwd = process.cwd(), options = {})
     progressPath,
     storageStatePath,
     studyCourses: parseList(env.CHAOXING_STUDY_COURSES),
+    studyConcurrency: parseIntegerInRange(
+      env.CHAOXING_STUDY_CONCURRENCY,
+      DEFAULT_STUDY_CONCURRENCY,
+      1,
+      3,
+      "CHAOXING_STUDY_CONCURRENCY",
+    ),
     studyMemoMarkdownPath,
     studyMemoPath,
     studyReportMarkdownPath,
