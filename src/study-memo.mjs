@@ -330,6 +330,7 @@ export class StudyMemoStore {
     this.markdownPath = markdownPath;
     this.state = state;
     this.now = now;
+    this.mutationQueue = Promise.resolve();
   }
 
   static async open({
@@ -359,9 +360,13 @@ export class StudyMemoStore {
     return this.state;
   }
 
-  async mutate(updater) {
-    const result = await updater(this.state);
-    await this.save();
-    return result;
+  mutate(updater) {
+    const operation = this.mutationQueue.then(async () => {
+      const result = await updater(this.state);
+      await this.save();
+      return result;
+    });
+    this.mutationQueue = operation.catch(() => {});
+    return operation;
   }
 }

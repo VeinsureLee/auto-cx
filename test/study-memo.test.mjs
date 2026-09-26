@@ -9,6 +9,7 @@ import {
   createStudyMemo,
   lessonNeedsWork,
   lessonStatusLabel,
+  readStudyMemo,
   refreshCatalog,
   setLessonHomework,
   setLessonVideo,
@@ -147,6 +148,60 @@ test("StudyMemoStore atomically round-trips JSON and derived Markdown", async ()
       ["memo.json", "memo.md"],
       "temporary files should be renamed away",
     );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("StudyMemoStore serializes concurrent mutations without losing updates", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "study-memo-queue-"));
+  const filePath = path.join(directory, "memo.json");
+  const markdownPath = path.join(directory, "memo.md");
+  try {
+    const course = { courseId: "1", clazzId: "2", name: "课程", url: "https://example.test" };
+    const store = await StudyMemoStore.open({ filePath, markdownPath, courses: [course] });
+    await store.mutate((state) => refreshCatalog(state, course, [
+      catalogLesson({ knowledgeId: "a", ordinal: 1 }),
+      catalogLesson({ knowledgeId: "b", ordinal: 2 }),
+    ]));
+
+    const order = [];
+    await Promise.all([
+      store.mutate(async (state) => {
+        order.push("a:start");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        setLessonVideo(state, course, { knowledgeId: "a" }, { status: "done" });
+        order.push("a:end");
+      }),
+      store.mutate(async (state) => {
+        order.push("b:start");
+        setLessonVideo(state, course, { knowledgeId: "b" }, { status: "done" });
+        order.push("b:end");
+      }),
+    ]);
+
+    assert.deepEqual(order, ["a:start", "a:end", "b:start", "b:end"]);
+    const persisted = await readStudyMemo(filePath);
+    assert.deepEqual(persisted.courses[0].lessons.map((lesson) => lesson.video.status), ["done", "done"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("StudyMemoStore continues after a rejected mutation", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "study-memo-recovery-"));
+  const filePath = path.join(directory, "memo.json");
+  try {
+    const store = await StudyMemoStore.open({ filePath, courses: [] });
+
+    await assert.rejects(store.mutate(async () => {
+      throw new Error("expected mutation failure");
+    }), /expected mutation failure/);
+    await store.mutate((state) => {
+      state.selection.courseQueries = ["仍可写入"];
+    });
+
+    assert.deepEqual((await readStudyMemo(filePath)).selection.courseQueries, ["仍可写入"]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
