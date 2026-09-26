@@ -3,7 +3,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 import { readConfig } from "./config.mjs";
-import { runStudy } from "./study.mjs";
+import { runStudy } from "./learning/run-study.mjs";
 import { writeStudyReport } from "./persistence/study-report.mjs";
 export { renderStudyReportMarkdown, writeStudyReport } from "./persistence/study-report.mjs";
 
