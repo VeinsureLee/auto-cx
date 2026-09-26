@@ -10,7 +10,7 @@
     "progress": "node src/progress-cli.mjs",
     "study": "node src/study-cli.mjs",
     "study:dry": "node src/study-cli.mjs --dry-run",
-    "check": "node --check src/login.mjs && node --check src/progress-cli.mjs && node --check src/config.mjs && node --check src/courses.mjs && node --check src/course-progress.mjs && node --check src/course-navigation.mjs && node --check src/video-preview.mjs && node --check src/study-cli.mjs && node --check src/study.mjs && node --check src/study-memo.mjs && node --check src/study-progress.mjs && node --check src/task-manifest.mjs && node --check src/video-runner.mjs && node --check src/task-point.mjs && node --check src/quiz.mjs && node --check src/answerer.mjs && node --check src/study-selectors.mjs",
+    "check": "node --check src/login.mjs && node --check src/progress-cli.mjs && node --check src/config.mjs && node --check src/courses.mjs && node --check src/course-progress.mjs && node --check src/course-navigation.mjs && node --check src/video-preview.mjs && node --check src/study-cli.mjs && node --check src/study.mjs && node --check src/study-scheduler.mjs && node --check src/study-memo.mjs && node --check src/study-progress.mjs && node --check src/task-manifest.mjs && node --check src/video-runner.mjs && node --check src/task-point.mjs && node --check src/quiz.mjs && node --check src/answerer.mjs && node --check src/study-selectors.mjs",
     "test": "node --test"
   },
   "engines": {
