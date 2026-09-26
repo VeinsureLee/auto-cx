@@ -40,6 +40,27 @@ export const STUDY_SELECTORS = {
     maxAttempts: 3,
   },
 
+  // 任务点完成状态（只读取任务标签或其关联 DOM，不点击、不改播放进度）。
+  // 图标与提示均位于 cards 帧的任务标签内部；真实 DOM 校准只改这里。
+  taskPoint: {
+    iconCandidates: [
+      "span.ans-job-icon",
+      ".ans-job-icon",
+      ".jobIcon",
+      "[class*='job-icon']",
+    ],
+    conditionTextCandidates: [
+      ".jobUnfinish",
+      ".jobFinish",
+      "[class*='jobUnfinish']",
+      "[class*='jobTip']",
+    ],
+    // class 分词后表示“已完成”的关键字（按分词边界匹配，避免误伤 notdone 等）
+    completionClassWords: ["done", "complete", "finished", "clear"],
+    // 可能携带显式完成布尔值的属性名
+    completionAttrNames: ["data-completed", "data-finish", "data-finished", "data-complete"],
+  },
+
   // 章节测验（作业）页面（基于真实 DOM：.RightCon.newTestCon）
   quiz: {
     questionBlock: ".TiMu.newTiMu",
