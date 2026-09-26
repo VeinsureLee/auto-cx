@@ -23,7 +23,11 @@ import {
   openCourseCatalog,
   waitForTaskSurface,
 } from "./task-manifest.mjs";
-import { filterLessonsByQuery, selectEligibleLessons } from "./study-scheduler.mjs";
+import {
+  filterLessonsByQuery,
+  runDynamicWorkerPool,
+  selectEligibleLessons,
+} from "./study-scheduler.mjs";
 import { StudyProgress } from "./study-progress.mjs";
 import { playManifestVideo } from "./video-runner.mjs";
 
@@ -110,6 +114,36 @@ export function pickNextLesson(catalogLessons, memoLessons, attempted, phase, dr
     dryRun,
     limit: 1,
   })[0] ?? null;
+}
+
+export function markPendingLessonWorkFailed(
+  memo,
+  course,
+  lesson,
+  { phase = null, detail, now = Date.now } = {},
+) {
+  const courseRecord = memo.courses.find(
+    (candidate) => makeCourseKey(candidate) === makeCourseKey(course),
+  );
+  const record = courseRecord?.lessons.find(
+    (candidate) => String(candidate.knowledgeId) === String(lesson.knowledgeId),
+  );
+  if (!record) {
+    throw new Error(`备忘录中不存在课节 ${lesson.knowledgeId ?? lesson.title ?? ""}。`);
+  }
+  if (phase !== "homework" && videoNeedsWork(record.video)) {
+    setLessonVideo(memo, course, lesson, { status: "failed", lastError: detail }, now);
+  }
+  if (phase !== "video" && homeworkNeedsWork(record.homework, { submitDryRun: true })) {
+    setLessonHomework(memo, course, lesson, { status: "failed", lastError: detail }, now);
+  }
+  return record;
+}
+
+async function recordUnexpectedLessonFailure({ store, course, lesson, phase, detail, now }) {
+  return store.mutate((memo) =>
+    markPendingLessonWorkFailed(memo, course, lesson, { phase, detail, now }),
+  );
 }
 
 async function playVideoTask({ page, course, lesson, task, store, config, now, progress, slot }) {
@@ -343,6 +377,14 @@ async function processLesson({
     progress.log(`      ⚠ ${surfaceFailure}`);
   }
 
+  if (tasks.length === 0) {
+    const detail = surfaceFailure ?? "课节页面中未发现任务标签";
+    await store.mutate((state) =>
+      markPendingLessonWorkFailed(state, course, lesson, { phase, detail, now }),
+    );
+    return { status: "failed", detail };
+  }
+
   const videoTasks = tasks.filter((task) => task.kind === "video");
   const homeworkTasks = tasks.filter((task) => task.kind === "assessment");
 
@@ -368,7 +410,8 @@ async function processLesson({
     }
   }
 
-  if (!failure && phase !== "video" && homeworkNeedsWork(memoLesson.homework, { submitDryRun: !dryRun })) {
+  // 视频失败后仍尝试作业（保留历史全流程行为），但课节整体仍报告失败。
+  if (phase !== "video" && homeworkNeedsWork(memoLesson.homework, { submitDryRun: !dryRun })) {
     for (const task of homeworkTasks) {
       const ok = await handleHomeworkTask({
         page,
@@ -384,7 +427,7 @@ async function processLesson({
         slot,
       });
       if (!ok) {
-        failure = `作业“${task.title}”处理失败`;
+        failure ??= `作业“${task.title}”处理失败`;
         break;
       }
     }
@@ -393,76 +436,178 @@ async function processLesson({
   return failure ? { status: "failed", detail: failure } : { status: "done" };
 }
 
-async function processCourse({ page, course, store, config, dryRun, phase, now, lessonsQuery, progress }) {
-  const attempted = new Set();
-  let progressStarted = false;
+async function processAssignedLesson({
+  page,
+  course,
+  assignedLesson,
+  store,
+  config,
+  dryRun,
+  phase,
+  now,
+  progress,
+  slot,
+}) {
+  progress.assign(slot, { lessonTitle: assignedLesson.label ?? assignedLesson.title });
 
-  for (let round = 0; round < 500; round += 1) {
-    // 两个课节之间稍作停顿，降低连续跳转触发平台限流的概率。
-    if (round > 0) {
-      await page.waitForTimeout(2_000);
-    }
-    const { chapterFrame, lessons: catalogLessons } = await openCourseCatalog(
-      page,
-      course,
-      config.timeoutMs,
+  const { chapterFrame, lessons: catalogLessons } = await openCourseCatalog(
+    page,
+    course,
+    config.timeoutMs,
+  );
+  const catalogLesson = catalogLessons.find(
+    (candidate) => String(candidate.knowledgeId) === String(assignedLesson.knowledgeId),
+  );
+  if (!catalogLesson || isLockedLesson(catalogLesson)) {
+    return { status: "locked" };
+  }
+
+  const courseRecord = await store.mutate((state) =>
+    refreshCatalog(state, course, catalogLessons.map(toMemoLesson), now),
+  );
+  const memoLesson = courseRecord.lessons.find(
+    (candidate) => String(candidate.knowledgeId) === String(assignedLesson.knowledgeId),
+  );
+  if (!memoLesson) {
+    await store.mutate((state) =>
+      markPendingLessonWorkFailed(state, course, assignedLesson, {
+        phase,
+        detail: "目录刷新后未找到课节记录",
+        now,
+      }),
     );
-    const courseRecord = await store.mutate((state) =>
-      refreshCatalog(state, course, catalogLessons.map(toMemoLesson), now),
+    return { status: "failed", detail: "目录刷新后未找到课节记录" };
+  }
+
+  const cardsFrame = await clickLessonInChapterFrame({
+    chapterFrame,
+    page,
+    lesson: catalogLesson,
+    timeoutMs: config.timeoutMs,
+  });
+  if (!cardsFrame) {
+    await store.mutate((state) =>
+      markPendingLessonWorkFailed(state, course, assignedLesson, {
+        phase,
+        detail: "课节打开后未找到内容帧",
+        now,
+      }),
     );
+    return { status: "failed", detail: "课节打开后未找到内容帧" };
+  }
 
-    // 只处理 --lesson 指定的节号范围（如 9.1、9.1-9.5、9=整章）。
-    const workableLessons = filterLessonsByQuery(catalogLessons, lessonsQuery);
-    if (!progressStarted) {
-      progress.startCourse({
-        name: course.name,
-        total: workableLessons.length,
-        concurrency: 1,
-      });
-      progressStarted = true;
-    }
-    const target = pickNextLesson(workableLessons, courseRecord.lessons, attempted, phase, dryRun);
-    if (!target) {
-      break;
-    }
-    attempted.add(String(target.knowledgeId));
+  return processLesson({
+    page,
+    course,
+    lesson: assignedLesson,
+    memoLesson,
+    store,
+    config,
+    dryRun,
+    phase,
+    now,
+    progress,
+    slot,
+  });
+}
 
-    console.log(`  - 学习课节：${target.label ?? target.title}`);
-    const cardsFrame = await clickLessonInChapterFrame({
-      chapterFrame,
-      page,
-      lesson: target,
-      timeoutMs: config.timeoutMs,
+async function processCourse({
+  context,
+  coordinatorPage,
+  course,
+  store,
+  config,
+  dryRun,
+  phase,
+  now,
+  lessonsQuery,
+  concurrency,
+  progress,
+}) {
+  const workerPages = new Map();
+  let courseStarted = false;
+
+  try {
+    await runDynamicWorkerPool({
+      concurrency,
+      keyOf: (lesson) => String(lesson.knowledgeId),
+      loadCandidates: async ({ activeIds, attemptedIds }) => {
+        const { lessons: catalogLessons } = await openCourseCatalog(
+          coordinatorPage,
+          course,
+          config.timeoutMs,
+        );
+        const courseRecord = await store.mutate((state) =>
+          refreshCatalog(state, course, catalogLessons.map(toMemoLesson), now),
+        );
+        if (!courseStarted) {
+          progress.startCourse({
+            name: course.name,
+            total: filterLessonsByQuery(catalogLessons, lessonsQuery).length,
+            concurrency,
+          });
+          courseStarted = true;
+        }
+        return selectEligibleLessons({
+          catalogLessons,
+          memoLessons: courseRecord.lessons,
+          queries: lessonsQuery,
+          activeIds,
+          attemptedIds,
+          phase,
+          dryRun,
+          limit: concurrency - activeIds.size,
+        });
+      },
+      runItem: async (lesson, slot) => {
+        const page = workerPages.get(slot) ?? await context.newPage();
+        workerPages.set(slot, page);
+        page.setDefaultTimeout(config.timeoutMs);
+        page.setDefaultNavigationTimeout(config.timeoutMs);
+        return processAssignedLesson({
+          page,
+          course,
+          assignedLesson: lesson,
+          store,
+          config,
+          dryRun,
+          phase,
+          now,
+          progress,
+          slot,
+        });
+      },
+      onSettled: async ({ item, slot, status, value, reason }) => {
+        const outcome =
+          status === "rejected"
+            ? { status: "failed", detail: reason?.message ?? String(reason) }
+            : {
+                status: value?.status ?? "failed",
+                detail: value?.detail ?? `${item.label ?? item.title} 已处理`,
+              };
+
+        if (status === "rejected") {
+          await recordUnexpectedLessonFailure({
+            store,
+            course,
+            lesson: item,
+            phase,
+            detail: outcome.detail,
+            now,
+          });
+        }
+
+        progress.finish(slot, outcome);
+        if (outcome.status === "failed" && progress.isTTY) {
+          progress.warn(`页面 ${slot} ${item.label ?? item.title}：${outcome.detail ?? "处理失败"}`);
+        }
+        progress.release(slot);
+      },
     });
-    if (!cardsFrame) {
-      await store.mutate((state) => {
-        setLessonVideo(state, course, target, { status: "failed", lastError: "课节打开后未找到内容帧" }, now);
-        setLessonHomework(state, course, target, { status: "failed", lastError: "课节打开后未找到内容帧" }, now);
-      });
-      continue;
-    }
-
-    progress.assign(1, { lessonTitle: target.label ?? target.title });
-    const memoLesson = courseRecord.lessons.find(
-      (candidate) => String(candidate.knowledgeId) === String(target.knowledgeId),
+  } finally {
+    await Promise.allSettled(
+      [...workerPages.values()].map((page) => page.close().catch(() => {})),
     );
-    const result = await processLesson({
-      page,
-      course,
-      lesson: target,
-      memoLesson,
-      store,
-      config,
-      dryRun,
-      phase,
-      now,
-      progress,
-      slot: 1,
-    });
-    progress.finish(1, result.status === "done"
-      ? { status: "done" }
-      : { status: "failed", detail: result.detail });
-    progress.release(1);
   }
 }
 
@@ -534,12 +679,20 @@ export function buildStudyReport({
   };
 }
 
-export async function runStudy({ dryRun = false, phase = null, config, coursesQuery, lessonsQuery = null } = {}) {
+export async function runStudy({
+  dryRun = false,
+  phase = null,
+  config = null,
+  coursesQuery,
+  lessonsQuery = null,
+  concurrency = config?.studyConcurrency,
+} = {}) {
   if (![null, "video", "homework"].includes(phase)) {
     throw new Error(`不支持的学习阶段“${phase}”；目前支持 --phase video 或 --phase homework。`);
   }
   const resolvedConfig =
     config ?? readConfig(process.env, process.cwd(), { requireCredentials: false });
+  const effectiveConcurrency = concurrency ?? resolvedConfig.studyConcurrency;
   if (!resolvedConfig.deepseekApiKey) {
     throw new Error("缺少 DeepSeek API Key。请设置 CHAOXING_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY。");
   }
@@ -582,9 +735,10 @@ export async function runStudy({ dryRun = false, phase = null, config, coursesQu
     page.setDefaultNavigationTimeout(resolvedConfig.timeoutMs);
 
     for (const course of courses) {
-      console.log(`学习课程：${course.name}`);
+      progress.log(`学习课程：${course.name}`);
       await processCourse({
-        page,
+        context,
+        coordinatorPage: page,
         course,
         store,
         config: resolvedConfig,
@@ -592,6 +746,7 @@ export async function runStudy({ dryRun = false, phase = null, config, coursesQu
         phase,
         now: Date.now,
         lessonsQuery,
+        concurrency: effectiveConcurrency,
         progress,
       });
     }

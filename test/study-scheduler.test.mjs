@@ -43,7 +43,7 @@ test("runDynamicWorkerPool never exceeds concurrency and refills released slots"
   const items = ["a", "b", "c", "d"];
   let running = 0;
   let peak = 0;
-  const completed = [];
+  const settled = [];
 
   await runDynamicWorkerPool({
     concurrency: 3,
@@ -57,11 +57,26 @@ test("runDynamicWorkerPool never exceeds concurrency and refills released slots"
       running -= 1;
       return { item, slot };
     },
-    onSettled: ({ item }) => completed.push(item),
+    onSettled: ({ item, slot }) => settled.push({ item, slot }),
   });
 
   assert.equal(peak, 3);
-  assert.deepEqual(new Set(completed), new Set(items));
+  assert.ok(settled.every(({ slot }) => slot >= 1 && slot <= 3));
+  assert.equal(new Set(settled.map(({ item }) => item)).size, 4);
+});
+
+test("runDynamicWorkerPool exposes active IDs while another page is running", async () => {
+  const snapshots = [];
+  await runDynamicWorkerPool({
+    concurrency: 2,
+    keyOf: (item) => item,
+    loadCandidates: ({ activeIds, attemptedIds }) => {
+      snapshots.push([...activeIds].sort());
+      return ["a", "b"].filter((item) => !activeIds.has(item) && !attemptedIds.has(item));
+    },
+    runItem: async () => new Promise((resolve) => setTimeout(resolve, 5)),
+  });
+  assert.ok(snapshots.some((ids) => ids.length > 0));
 });
 
 test("runDynamicWorkerPool discovers an item unlocked by a completed predecessor", async () => {

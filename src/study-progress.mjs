@@ -1,3 +1,5 @@
+import process from "node:process";
+
 const HIDE_CURSOR = "\u001b[?25l";
 const SHOW_CURSOR = "\u001b[?25h";
 const DEFAULT_BAR_WIDTH = 20;
@@ -96,6 +98,13 @@ export class StudyProgress {
     this.cursorHidden = false;
     this.stopped = false;
     this.renderTimer = null;
+    this.signalHandlers = new Map(
+      ["SIGINT", "SIGTERM"].map((signal) => [signal, () => {
+        this.stop();
+        process.kill(process.pid, signal);
+      }]),
+    );
+    for (const [signal, handler] of this.signalHandlers) process.once(signal, handler);
   }
 
   startCourse({ name, total, concurrency = 1 } = {}) {
@@ -205,6 +214,12 @@ export class StudyProgress {
   stop() {
     if (this.stopped) return;
     this.stopped = true;
+    if (this.signalHandlers) {
+      for (const [signal, handler] of this.signalHandlers) {
+        process.removeListener(signal, handler);
+      }
+      this.signalHandlers.clear();
+    }
     if (this.renderTimer) {
       clearTimeout(this.renderTimer);
       this.renderTimer = null;

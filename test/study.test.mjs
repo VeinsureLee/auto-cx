@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { filterCoursesByQuery, filterLessonsByQuery, pickNextLesson } from "../src/study.mjs";
+import { createStudyMemo, refreshCatalog, setLessonVideo } from "../src/study-memo.mjs";
+import {
+  filterCoursesByQuery,
+  filterLessonsByQuery,
+  markPendingLessonWorkFailed,
+  pickNextLesson,
+} from "../src/study.mjs";
 
 const courses = [
   { courseId: "1", name: "创新创业基础" },
@@ -157,4 +163,30 @@ test("filterLessonsByQuery falls back to the title section prefix", () => {
   ];
   assert.deepEqual(filterLessonsByQuery(lessons, ["9.3"]).map((l) => l.knowledgeId), ["1"]);
   assert.deepEqual(filterLessonsByQuery(lessons, ["10"]).map((l) => l.knowledgeId), ["2"]);
+});
+
+test("markPendingLessonWorkFailed preserves completed work and fails pending work", () => {
+  const course = { courseId: "1", clazzId: "2", name: "课程" };
+  const state = createStudyMemo({ courses: [course] });
+  refreshCatalog(state, course, [{
+    knowledgeId: "1.1",
+    title: "1.1 标题",
+    ordinal: 1,
+    locked: false,
+    catalogCompleted: false,
+    pendingTaskCount: 2,
+  }]);
+  setLessonVideo(state, course, { knowledgeId: "1.1" }, { status: "done" });
+
+  markPendingLessonWorkFailed(
+    state,
+    course,
+    { knowledgeId: "1.1" },
+    { phase: null, detail: "页面已关闭", now: () => new Date(0) },
+  );
+
+  const lesson = state.courses[0].lessons[0];
+  assert.equal(lesson.video.status, "done");
+  assert.equal(lesson.homework.status, "failed");
+  assert.equal(lesson.homework.lastError, "页面已关闭");
 });
