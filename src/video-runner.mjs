@@ -28,7 +28,7 @@ export async function playManifestVideo({
   let popupAttempts = 0;
 
   const result = await runWaitForMediaTarget(frame, "video", config.timeoutMs, {
-    targetPercent: config.videoTargetPercent,
+    // 不再传 targetPercent：默认自然播到 100%，完成判定交给任务点状态。
     speed: config.videoSpeed,
     onSample: onProgress,
     onTick: async () => {

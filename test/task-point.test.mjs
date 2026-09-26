@@ -6,6 +6,7 @@ import {
   mediaTargetSeconds,
   waitForMediaEnd,
   waitForMediaTarget,
+  waitForMediaTaskCompletion,
 } from "../src/task-point.mjs";
 
 function createMediaFrame(states) {
@@ -129,6 +130,114 @@ test("media target helpers use the configured percentage without seeking", () =>
     hasReachedMediaTarget({ currentTime: 190, duration: 200, ended: false }, 95),
     true,
   );
+});
+
+// 同时模拟媒体进度与任务点完成状态：readTaskPoint 每次轮询推进一次任务点状态。
+function createFakeTaskPointFrame({ mediaStates, taskStates }) {
+  const fake = createMediaFrame(mediaStates);
+  let taskReadIndex = 0;
+  return {
+    frame: fake.frame,
+    now: fake.now,
+    async readTaskPoint() {
+      const state = taskStates[Math.min(taskReadIndex, taskStates.length - 1)];
+      taskReadIndex += 1;
+      return { state, conditionText: "fake", source: "fake-task-point" };
+    },
+  };
+}
+
+test("media completion defaults to natural 100 percent", async () => {
+  const fake = createMediaFrame([
+    { currentTime: 95, duration: 100, ended: false, paused: false, readyState: 4 },
+    { currentTime: 100, duration: 100, ended: true, paused: true, readyState: 4 },
+  ]);
+  const result = await waitForMediaTarget(fake.frame, "video", 30_000, {
+    now: fake.now,
+    pollIntervalMs: 1_000,
+  });
+  assert.equal(result.status, "reached_target");
+  assert.equal(result.targetSeconds, 100);
+});
+
+test("task-point completed can finish before natural end", async () => {
+  const fake = createFakeTaskPointFrame({
+    mediaStates: [{ currentTime: 50, duration: 100, ended: false, paused: false, readyState: 4 }],
+    taskStates: ["completed"],
+  });
+  const result = await waitForMediaTaskCompletion(fake.frame, "video", 30_000, {
+    now: fake.now,
+    pollIntervalMs: 1_000,
+    readTaskPoint: fake.readTaskPoint,
+  });
+  assert.equal(result.status, "task_completed");
+  assert.equal(result.state.currentTime, 50);
+  assert.equal(result.taskPointState.state, "completed");
+});
+
+test("pending task-point after end waits then fails", async () => {
+  const fake = createFakeTaskPointFrame({
+    mediaStates: [{ currentTime: 100, duration: 100, ended: true, paused: true, readyState: 4 }],
+    taskStates: ["pending", "pending", "pending"],
+  });
+  const result = await waitForMediaTaskCompletion(fake.frame, "video", 30_000, {
+    now: fake.now,
+    pollIntervalMs: 1_000,
+    completionSyncTimeoutMs: 2_000,
+    readTaskPoint: fake.readTaskPoint,
+  });
+  assert.equal(result.status, "error");
+  assert.equal(result.detail, "视频已播放结束但任务点仍未完成");
+  assert.equal(result.taskPointState.state, "pending");
+});
+
+test("unavailable task-point at natural end resolves as reached target", async () => {
+  const fake = createFakeTaskPointFrame({
+    mediaStates: [{ currentTime: 100, duration: 100, ended: true, paused: true, readyState: 4 }],
+    taskStates: ["unavailable"],
+  });
+  const result = await waitForMediaTaskCompletion(fake.frame, "video", 30_000, {
+    now: fake.now,
+    pollIntervalMs: 1_000,
+    readTaskPoint: fake.readTaskPoint,
+  });
+  assert.equal(result.status, "reached_target");
+  assert.equal(result.targetSeconds, 100);
+  assert.equal(result.taskPointState.state, "unavailable");
+});
+
+test("waitForMediaTaskCompletion without a task reader waits for natural end", async () => {
+  const fake = createMediaFrame([
+    { currentTime: 40, duration: 100, ended: false, paused: false, readyState: 4 },
+    { currentTime: 100, duration: 100, ended: true, paused: true, readyState: 4 },
+  ]);
+  const result = await waitForMediaTaskCompletion(fake.frame, "video", 30_000, {
+    now: fake.now,
+    pollIntervalMs: 1_000,
+  });
+  assert.equal(result.status, "reached_target");
+  assert.equal(result.state.ended, true);
+  assert.equal(result.taskPointState.state, "unavailable");
+});
+
+test("media leaving the ended state resets the completion sync window", async () => {
+  const fake = createFakeTaskPointFrame({
+    mediaStates: [
+      { currentTime: 100, duration: 100, ended: true, paused: true, readyState: 4 },
+      { currentTime: 20, duration: 100, ended: false, paused: false, readyState: 4 },
+      { currentTime: 100, duration: 100, ended: true, paused: true, readyState: 4 },
+    ],
+    taskStates: ["pending", "pending", "pending", "pending", "pending"],
+  });
+  const result = await waitForMediaTaskCompletion(fake.frame, "video", 30_000, {
+    now: fake.now,
+    pollIntervalMs: 1_000,
+    completionSyncTimeoutMs: 2_000,
+    readTaskPoint: fake.readTaskPoint,
+  });
+  assert.equal(result.status, "error");
+  // 第 2 次轮询媒体离开 ended（重播），计时重置；第 3 次重新进入 ended 后再等 2 秒。
+  assert.equal(fake.now(), 4_000);
 });
 
 test("waitForMediaTarget stops as soon as natural playback reaches 95 percent", async () => {
