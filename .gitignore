@@ -3,6 +3,8 @@
 !.env.example
 
 node_modules/
+.worktrees/
+.superpowers/
 .auth/
 artifacts/
 playwright-report/
