@@ -15,16 +15,24 @@ export async function playManifestVideo({
   config,
   onProgress = async () => {},
   onPopupQuiz = async () => {},
+  deps = {},
 }) {
-  await startMediaPlayback(frame, "video", { speed: config.videoSpeed });
+  const {
+    startMediaPlayback: runStartMediaPlayback = startMediaPlayback,
+    waitForMediaTarget: runWaitForMediaTarget = waitForMediaTarget,
+    isVideoQuizVisible: checkVideoQuizVisible = isVideoQuizVisible,
+    handleVideoQuizWork: runHandleVideoQuizWork = handleVideoQuizWork,
+  } = deps;
+
+  await runStartMediaPlayback(frame, "video", { speed: config.videoSpeed });
   let popupAttempts = 0;
 
-  const result = await waitForMediaTarget(frame, "video", config.timeoutMs, {
+  const result = await runWaitForMediaTarget(frame, "video", config.timeoutMs, {
     targetPercent: config.videoTargetPercent,
     speed: config.videoSpeed,
     onSample: onProgress,
     onTick: async () => {
-      if (!(await isVideoQuizVisible(frame))) {
+      if (!(await checkVideoQuizVisible(frame))) {
         return false;
       }
       if (popupAttempts >= STUDY_SELECTORS.videoQuiz.maxAttempts) {
@@ -32,7 +40,8 @@ export async function playManifestVideo({
       }
 
       popupAttempts += 1;
-      const quizResult = await handleVideoQuizWork({ frame, config }).catch((error) => ({
+      await onPopupQuiz({ status: "handling", detail: "正在处理视频弹题" });
+      const quizResult = await runHandleVideoQuizWork({ frame, config }).catch((error) => ({
         status: "error",
         detail: error.message ?? String(error),
         answers: [],

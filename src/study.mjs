@@ -24,6 +24,7 @@ import {
   waitForTaskSurface,
 } from "./task-manifest.mjs";
 import { filterLessonsByQuery, selectEligibleLessons } from "./study-scheduler.mjs";
+import { StudyProgress } from "./study-progress.mjs";
 import { playManifestVideo } from "./video-runner.mjs";
 
 loadDotenv({ quiet: true });
@@ -111,7 +112,9 @@ export function pickNextLesson(catalogLessons, memoLessons, attempted, phase, dr
   })[0] ?? null;
 }
 
-async function playVideoTask({ page, course, lesson, task, store, config, now }) {
+async function playVideoTask({ page, course, lesson, task, store, config, now, progress, slot }) {
+  progress.stage(slot, { name: "video", taskTitle: task.title, detail: "正在打开视频" });
+
   try {
     await clickTaskTab(page, task);
   } catch (error) {
@@ -130,7 +133,25 @@ async function playVideoTask({ page, course, lesson, task, store, config, now })
   }
 
   try {
-    await playManifestVideo({ frame: surface.frame, config });
+    await playManifestVideo({
+      frame: surface.frame,
+      config,
+      onProgress: async (state, { targetSeconds }) => {
+        progress.video(slot, {
+          currentTime: state.currentTime,
+          duration: state.duration,
+          targetSeconds,
+          speed: config.videoSpeed,
+        });
+      },
+      onPopupQuiz: async (result) => {
+        progress.stage(slot, {
+          name: "video-quiz",
+          taskTitle: task.title,
+          detail: result.detail ?? (result.status === "handling" ? "正在处理视频弹题" : "视频弹题已处理"),
+        });
+      },
+    });
     await store.mutate((state) =>
       setLessonVideo(state, course, lesson, { status: "done", lastError: null }, now),
     );
@@ -165,6 +186,8 @@ async function handleHomeworkTask({
   config,
   dryRun,
   now,
+  progress,
+  slot,
 }) {
   try {
     await clickTaskTab(page, task);
@@ -180,6 +203,8 @@ async function handleHomeworkTask({
     ? memoLesson.homework.trials.slice()
     : [];
   const savedAnswers = memoLesson.homework?.lastAnswers ?? null;
+
+  progress.stage(slot, { name: "homework", taskTitle: task.title, detail: "正在读取作业" });
 
   let attempts = 0;
   while (attempts < HOMEWORK_MAX_ATTEMPTS) {
@@ -229,6 +254,7 @@ async function handleHomeworkTask({
 
     let result;
     try {
+      progress.stage(slot, { name: "homework", taskTitle: task.title, detail: "正在生成并填写答案" });
       result = await handleQuizWork({
         frame: surface.frame,
         page,
@@ -237,6 +263,9 @@ async function handleHomeworkTask({
         // 第一次尝试复用 dry-run 保存的答案；重试时由大模型结合试错表重新生成。
         precomputedAnswers: attempts === 0 && !dryRun ? savedAnswers : null,
         trials,
+        beforeSubmit: async () => {
+          progress.stage(slot, { name: "homework", taskTitle: task.title, detail: "正在提交作业" });
+        },
       });
     } catch (error) {
       if (isDetachedError(error)) {
@@ -254,6 +283,13 @@ async function handleHomeworkTask({
       await store.mutate((state) =>
         setLessonHomework(state, course, lesson, { status: "failed", lastError: result.detail, trials }, now),
       );
+      if (attempts + 1 < HOMEWORK_MAX_ATTEMPTS) {
+        progress.stage(slot, {
+          name: "homework-retry",
+          taskTitle: task.title,
+          detail: `第 ${attempts + 2}/${HOMEWORK_MAX_ATTEMPTS} 次尝试`,
+        });
+      }
       attempts += 1;
       await page.waitForTimeout(1_500);
       continue;
@@ -294,6 +330,8 @@ async function processLesson({
   dryRun,
   phase,
   now,
+  progress,
+  slot,
 }) {
   const { tasks, surfaceFailure } = await discoverLessonTasks({
     page,
@@ -302,7 +340,7 @@ async function processLesson({
     timeoutMs: config.timeoutMs,
   });
   if (surfaceFailure) {
-    console.log(`      ⚠ ${surfaceFailure}`);
+    progress.log(`      ⚠ ${surfaceFailure}`);
   }
 
   const videoTasks = tasks.filter((task) => task.kind === "video");
@@ -319,14 +357,18 @@ async function processLesson({
     );
   }
 
+  let failure = null;
   if (phase !== "homework" && videoNeedsWork(memoLesson.video)) {
     for (const task of videoTasks) {
-      const ok = await playVideoTask({ page, course, lesson, task, store, config, now });
-      if (!ok) break;
+      const ok = await playVideoTask({ page, course, lesson, task, store, config, now, progress, slot });
+      if (!ok) {
+        failure = `视频“${task.title}”处理失败`;
+        break;
+      }
     }
   }
 
-  if (phase !== "video" && homeworkNeedsWork(memoLesson.homework, { submitDryRun: !dryRun })) {
+  if (!failure && phase !== "video" && homeworkNeedsWork(memoLesson.homework, { submitDryRun: !dryRun })) {
     for (const task of homeworkTasks) {
       const ok = await handleHomeworkTask({
         page,
@@ -338,14 +380,22 @@ async function processLesson({
         config,
         dryRun,
         now,
+        progress,
+        slot,
       });
-      if (!ok) break;
+      if (!ok) {
+        failure = `作业“${task.title}”处理失败`;
+        break;
+      }
     }
   }
+
+  return failure ? { status: "failed", detail: failure } : { status: "done" };
 }
 
-async function processCourse({ page, course, store, config, dryRun, phase, now, lessonsQuery }) {
+async function processCourse({ page, course, store, config, dryRun, phase, now, lessonsQuery, progress }) {
   const attempted = new Set();
+  let progressStarted = false;
 
   for (let round = 0; round < 500; round += 1) {
     // 两个课节之间稍作停顿，降低连续跳转触发平台限流的概率。
@@ -363,6 +413,14 @@ async function processCourse({ page, course, store, config, dryRun, phase, now, 
 
     // 只处理 --lesson 指定的节号范围（如 9.1、9.1-9.5、9=整章）。
     const workableLessons = filterLessonsByQuery(catalogLessons, lessonsQuery);
+    if (!progressStarted) {
+      progress.startCourse({
+        name: course.name,
+        total: workableLessons.length,
+        concurrency: 1,
+      });
+      progressStarted = true;
+    }
     const target = pickNextLesson(workableLessons, courseRecord.lessons, attempted, phase, dryRun);
     if (!target) {
       break;
@@ -384,10 +442,11 @@ async function processCourse({ page, course, store, config, dryRun, phase, now, 
       continue;
     }
 
+    progress.assign(1, { lessonTitle: target.label ?? target.title });
     const memoLesson = courseRecord.lessons.find(
       (candidate) => String(candidate.knowledgeId) === String(target.knowledgeId),
     );
-    await processLesson({
+    const result = await processLesson({
       page,
       course,
       lesson: target,
@@ -397,7 +456,13 @@ async function processCourse({ page, course, store, config, dryRun, phase, now, 
       dryRun,
       phase,
       now,
+      progress,
+      slot: 1,
     });
+    progress.finish(1, result.status === "done"
+      ? { status: "done" }
+      : { status: "failed", detail: result.detail });
+    progress.release(1);
   }
 }
 
@@ -496,6 +561,7 @@ export async function runStudy({ dryRun = false, phase = null, config, coursesQu
     courses,
     courseQueries: coursesQuery ?? resolvedConfig.studyCourses,
   });
+  const progress = new StudyProgress();
 
   let browser = null;
   try {
@@ -526,6 +592,7 @@ export async function runStudy({ dryRun = false, phase = null, config, coursesQu
         phase,
         now: Date.now,
         lessonsQuery,
+        progress,
       });
     }
 
@@ -548,6 +615,7 @@ export async function runStudy({ dryRun = false, phase = null, config, coursesQu
     });
     throw failure;
   } finally {
+    progress.stop();
     if (browser) {
       await browser.close().catch(() => {});
     }

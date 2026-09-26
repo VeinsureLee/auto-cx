@@ -138,3 +138,20 @@ test("StudyProgress stop is idempotent and restores the cursor once", () => {
 
   assert.equal((stream.output().match(/\u001b\[\?25h/g) ?? []).length, 1);
 });
+
+test("StudyProgress shows popup quiz and homework retry stages for a page", () => {
+  const stream = memoryStream(true);
+  const progress = new StudyProgress({ stream, errorStream: stream, redrawIntervalMs: 0 });
+  progress.startCourse({ name: "课程", total: 1, concurrency: 1 });
+  progress.assign(1, { lessonTitle: "1.1 标题" });
+  progress.stage(1, { name: "video-quiz", detail: "正在处理视频弹题" });
+  progress.stage(1, { name: "homework", detail: "正在生成答案" });
+  progress.stage(1, { name: "homework-retry", detail: "第 2/3 次尝试" });
+  progress.finish(1, { status: "failed", detail: "作业失败" });
+  progress.stop();
+
+  assert.match(stream.output(), /正在处理视频弹题/);
+  assert.match(stream.output(), /正在生成答案/);
+  assert.match(stream.output(), /第 2\/3 次尝试/);
+  assert.match(stream.output(), /作业失败/);
+});
