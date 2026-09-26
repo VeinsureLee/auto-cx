@@ -1,4 +1,4 @@
-import { handleVideoQuizWork, isVideoQuizVisible } from "./quiz.mjs";
+import { handleVideoQuizWork, isVideoQuizVisible } from "./assessment/video-popup.mjs";
 import { startMediaPlayback, waitForMediaTaskCompletion } from "./task-point.mjs";
 
 class VideoPlaybackError extends Error {
