@@ -171,6 +171,22 @@ test("StudyProgress clamps each TTY row to the available terminal columns", () =
   progress.stop();
 });
 
+test("StudyProgress video updates accept task-point state alongside media percent", () => {
+  const stream = memoryStream(false);
+  const progress = new StudyProgress({ stream, errorStream: stream });
+  progress.startCourse({ name: "课程", total: 1, concurrency: 1 });
+  progress.assign(1, { lessonTitle: "1.1 第一节" });
+  // 媒体到 100% 时任务点仍可能未完成：任务点状态与媒体百分比分开传递，
+  // pending 不得因媒体满格而被当成已完成。
+  progress.video(1, { currentTime: 100, duration: 100, targetSeconds: 100, speed: 2, taskPointState: "pending" });
+  progress.video(1, { currentTime: 100, duration: 100, targetSeconds: 100, speed: 2, taskPointState: "completed" });
+  progress.video(1, { currentTime: 100, duration: 100, targetSeconds: 100, speed: 2, taskPointState: "unavailable" });
+  progress.stop();
+
+  assert.match(stream.output(), /视频进度 100%/);
+  assert.doesNotMatch(stream.output(), /\u001b\[/);
+});
+
 test("StudyProgress shows popup quiz and homework retry stages for a page", () => {
   const stream = memoryStream(true);
   const progress = new StudyProgress({ stream, errorStream: stream, redrawIntervalMs: 0 });

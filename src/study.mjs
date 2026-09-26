@@ -23,6 +23,7 @@ import {
   openCourseCatalog,
   waitForTaskSurface,
 } from "./task-manifest.mjs";
+import { readTaskPointState } from "./task-point-status.mjs";
 import {
   filterLessonsByQuery,
   runDynamicWorkerPool,
@@ -146,7 +147,27 @@ async function recordUnexpectedLessonFailure({ store, course, lesson, phase, det
   );
 }
 
-async function playVideoTask({ page, course, lesson, task, store, config, now, progress, slot }) {
+// 课节执行顺序：作业门通过后才允许视频；显式阶段例外。
+export function lessonExecutionOrder({ phase, homeworkResult, videoTaskCount }) {
+  if (phase === "video") return ["video"];
+  if (phase === "homework") return ["homework"];
+  if (!homeworkResult.success) return ["homework", "blocked-video"];
+  return ["homework", ...(videoTaskCount ? ["video"] : [])];
+}
+
+async function playVideoTask({
+  page,
+  course,
+  lesson,
+  task,
+  store,
+  config,
+  now,
+  progress,
+  slot,
+  taskPointReader = null,
+  completionSyncTimeoutMs,
+}) {
   progress.stage(slot, { name: "video", taskTitle: task.title, detail: "正在打开视频" });
 
   try {
@@ -170,12 +191,24 @@ async function playVideoTask({ page, course, lesson, task, store, config, now, p
     await playManifestVideo({
       frame: surface.frame,
       config,
+      readTaskPoint: taskPointReader,
+      completionSyncTimeoutMs,
       onProgress: async (state, { targetSeconds }) => {
+        // 任务点状态与媒体百分比分开上报：媒体播到 100% 不代表任务点已完成。
+        let taskPointState = null;
+        if (taskPointReader) {
+          try {
+            taskPointState = (await taskPointReader())?.state ?? null;
+          } catch {
+            taskPointState = null;
+          }
+        }
         progress.video(slot, {
           currentTime: state.currentTime,
           duration: state.duration,
           targetSeconds,
           speed: config.videoSpeed,
+          taskPointState,
         });
       },
       onPopupQuiz: async (result) => {
@@ -354,7 +387,7 @@ async function handleHomeworkTask({
   return false;
 }
 
-async function processLesson({
+export async function processLesson({
   page,
   course,
   lesson,
@@ -366,8 +399,15 @@ async function processLesson({
   now,
   progress,
   slot,
+  deps = {},
 }) {
-  const { tasks, surfaceFailure } = await discoverLessonTasks({
+  const {
+    discoverTasks = discoverLessonTasks,
+    runHomeworkTask = handleHomeworkTask,
+    runVideoTask = playVideoTask,
+  } = deps;
+
+  const { tasks, surfaceFailure } = await discoverTasks({
     page,
     course,
     lesson,
@@ -377,6 +417,7 @@ async function processLesson({
     progress.log(`      ⚠ ${surfaceFailure}`);
   }
 
+  // 无任务标签时持久化失败：绝不误标 none 后把课节报告为完成。
   if (tasks.length === 0) {
     const detail = surfaceFailure ?? "课节页面中未发现任务标签";
     await store.mutate((state) =>
@@ -399,21 +440,16 @@ async function processLesson({
     );
   }
 
-  let failure = null;
-  if (phase !== "homework" && videoNeedsWork(memoLesson.video)) {
-    for (const task of videoTasks) {
-      const ok = await playVideoTask({ page, course, lesson, task, store, config, now, progress, slot });
-      if (!ok) {
-        failure = `视频“${task.title}”处理失败`;
-        break;
-      }
-    }
-  }
-
-  // 视频失败后仍尝试作业（保留历史全流程行为），但课节整体仍报告失败。
-  if (phase !== "video" && homeworkNeedsWork(memoLesson.homework, { submitDryRun: !dryRun })) {
+  // 作业门：正常/试跑模式先完成全部作业；失败立即短路，不播放本课节视频。
+  // --phase video 显式跳过作业门。
+  let homeworkResult = { success: true, detail: null };
+  if (
+    phase !== "video" &&
+    homeworkTasks.length > 0 &&
+    homeworkNeedsWork(memoLesson.homework, { submitDryRun: !dryRun })
+  ) {
     for (const task of homeworkTasks) {
-      const ok = await handleHomeworkTask({
+      const ok = await runHomeworkTask({
         page,
         course,
         lesson,
@@ -427,13 +463,41 @@ async function processLesson({
         slot,
       });
       if (!ok) {
-        failure ??= `作业“${task.title}”处理失败`;
+        homeworkResult = { success: false, detail: `作业“${task.title}”处理失败` };
         break;
       }
     }
   }
+  if (!homeworkResult.success) {
+    return { status: "failed", detail: homeworkResult.detail };
+  }
 
-  return failure ? { status: "failed", detail: failure } : { status: "done" };
+  // 作业门通过后按清单顺序逐个播放视频；首个失败即短路。
+  const order = lessonExecutionOrder({ phase, homeworkResult, videoTaskCount: videoTasks.length });
+  if (order.includes("video") && videoNeedsWork(memoLesson.video)) {
+    for (const task of videoTasks) {
+      const taskPointReader = () => readTaskPointState(page, task);
+      const ok = await runVideoTask({
+        page,
+        course,
+        lesson,
+        task,
+        store,
+        config,
+        now,
+        progress,
+        slot,
+        taskPointReader,
+        // 可选配置：缺省时沿用 waitForMediaTaskCompletion 默认同步窗口。
+        completionSyncTimeoutMs: config.completionSyncTimeoutMs,
+      });
+      if (!ok) {
+        return { status: "failed", detail: `视频“${task.title}”处理失败` };
+      }
+    }
+  }
+
+  return { status: "done" };
 }
 
 async function processAssignedLesson({
