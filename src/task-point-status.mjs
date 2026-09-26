@@ -60,6 +60,10 @@ export function parseTaskPointState(input) {
   if (PENDING_WORDS.test(searchable)) {
     return "pending";
   }
+  // 显式布尔标志与否定词同级：明确未完成时不得被完成类名/肯定词覆盖。
+  if (completed === false) {
+    return "pending";
+  }
   if (completed === true) {
     return "completed";
   }
@@ -70,9 +74,6 @@ export function parseTaskPointState(input) {
     STUDY_SELECTORS.taskPoint?.completionClassWords ?? COMPLETION_CLASS_WORDS;
   if (hasCompletionClassWord(className, completionClassWords)) {
     return "completed";
-  }
-  if (completed === false) {
-    return "pending";
   }
   return "unavailable";
 }

@@ -54,6 +54,22 @@ test("explicit boolean completion flag is honored conservatively", () => {
   assert.equal(parseTaskPointState({}), "unavailable");
 });
 
+test("explicit completed=false wins over contradictory positive markers", () => {
+  // 显式布尔否定必须与显式否定词同级：不能被完成类名或肯定词覆盖。
+  assert.equal(
+    parseTaskPointState({ completed: false, className: "ans-job-icon ans-job-icon-done" }),
+    "pending",
+  );
+  assert.equal(
+    parseTaskPointState({ completed: false, ariaLabel: "任务点已完成" }),
+    "pending",
+  );
+  assert.equal(
+    parseTaskPointState({ completed: false, text: "已完成", className: "done" }),
+    "pending",
+  );
+});
+
 test("selectors expose task-point icon, condition text, and completion candidates", () => {
   const taskPoint = STUDY_SELECTORS.taskPoint;
   assert.ok(Array.isArray(taskPoint.iconCandidates) && taskPoint.iconCandidates.length > 0);
