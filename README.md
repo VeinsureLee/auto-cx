@@ -90,6 +90,20 @@ npm run study:dry -- --course "创新创业基础, 科研诚信"
 
 也可以用环境变量 `CHAOXING_STUDY_COURSES=课程关键字（逗号分隔）` 指定；命令行 `--course` 优先于环境变量。留空时默认学习全部未完成课程。
 
+### 并发听课（`--concurrency`）
+
+默认**串行**逐个课节学习；可指定 1 到 3 的并发数，同时打开多个课节（课节用逗号分隔）：
+
+```powershell
+npm run study -- --course 科研诚信 --lesson "1.1,1.2,1.3" --concurrency 3
+```
+
+- 并发默认为 1，最大为 3（`--concurrency 1..3`）；也可用环境变量 `CHAOXING_STUDY_CONCURRENCY=1` 设置，命令行 `--concurrency` 优先。
+- 每个并发课节使用**独立的浏览器页面**，各自完整执行“视频 + 作业”流程。
+- 终端会为每个活动页面显示一条独立的进度条。
+- 只运行未锁定的课节；闯关式课程（如“创新创业基础”）会自动降级为实际同时只学一节，直到后续课节在前置课节完成后解锁。
+- 选择多门课程时，课程之间仍然按顺序依次学习（并发仅作用于单门课程内的课节）。
+
 工作方式：
 
 - 从 `artifacts/incomplete-courses.json` 读取所选课程，只读课程目录，按 `knowledgeId` 记录每课节的标题、是否已完成、是否被闯关锁定、待完成任务点数；
@@ -143,6 +157,7 @@ CHAOXING_DEEPSEEK_API_KEY=sk-你的key
 - `CHAOXING_VIDEO_TARGET_PERCENT=95`：设置自然播放目标百分比，范围 1 到 100。
 - `CHAOXING_VIDEO_SPEED=2`：设置视频播放倍速，范围 0.5 到 4，默认 2（二倍速）。
 - `CHAOXING_VIDEO_RETRY_LIMIT=3`：设置单个视频每轮重试上限，范围 1 到 10。
+- `CHAOXING_STUDY_CONCURRENCY=1`：设置课节并发学习数，范围为 1 到 3，默认 1；命令行 `--concurrency` 优先于环境变量。
 - `CHAOXING_STUDY_COURSES=创新创业`：只学习名称包含该关键字的课程（逗号分隔多个）。
 
 `.env`、`.auth/`、`artifacts/` 和依赖目录都已加入 `.gitignore`。程序不会输出手机号、密码或 Cookie；若平台要求验证码，程序会停止并提示人工处理，不会尝试绕过。
