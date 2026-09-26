@@ -188,6 +188,42 @@ test("StudyMemoStore serializes concurrent mutations without losing updates", as
   }
 });
 
+test("StudyMemoStore recovers when a save fails and a queued mutation succeeds", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "study-memo-save-failure-"));
+  const filePath = path.join(directory, "memo.json");
+  const markdownPath = path.join(directory, "memo.md");
+  try {
+    const store = await StudyMemoStore.open({ filePath, markdownPath, courses: [] });
+    const originalSave = store.save.bind(store);
+    let failNextSave = true;
+    store.save = async () => {
+      if (failNextSave) {
+        failNextSave = false;
+        throw new Error("expected save failure");
+      }
+      return originalSave();
+    };
+
+    const failing = store.mutate((state) => {
+      state.selection.courseQueries = ["不会持久化"];
+    });
+
+    // Queue the second mutation before the first save rejects so the failure
+    // occurs while a later operation is already waiting on the queue.
+    const succeeding = store.mutate((state) => {
+      state.selection.courseQueries = ["仍可写入"];
+    });
+
+    await assert.rejects(failing, /expected save failure/);
+    await succeeding;
+
+    const persisted = await readStudyMemo(filePath);
+    assert.deepEqual(persisted.selection.courseQueries, ["仍可写入"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("StudyMemoStore continues after a rejected mutation", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "study-memo-recovery-"));
   const filePath = path.join(directory, "memo.json");
