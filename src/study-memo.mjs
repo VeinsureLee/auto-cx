@@ -38,11 +38,11 @@ export function makeCourseKey(course) {
 }
 
 function initialVideo() {
-  return { status: "pending", lastError: null, updatedAt: null };
+  return { status: "pending", lastError: null, completedTaskKeys: [], updatedAt: null };
 }
 
 function initialHomework() {
-  return { status: "pending", lastError: null, updatedAt: null };
+  return { status: "pending", lastError: null, completedTaskKeys: [], updatedAt: null };
 }
 
 function createCourseRecord(course) {

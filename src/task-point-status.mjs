@@ -5,7 +5,8 @@ import { STUDY_SELECTORS } from "./study-selectors.mjs";
 import { extractCardId, readTaskTabs, selectTaskTabIndex } from "./task-manifest.mjs";
 
 const PENDING_WORDS = /未完成|未达成|待完成/;
-const COMPLETED_WORDS = /已完成|完成|已达成/;
+// 仅接受明确指向任务点的完成语义；“完成条件”只是条件描述，不是完成状态。
+const COMPLETED_WORDS = /(?:任务点\s*已完成|已完成\s*任务点|任务点\s*已达成|已达成\s*任务点)/;
 const COMPLETION_CLASS_WORDS = ["done", "complete", "finished", "clear"];
 const COMPLETED_ATTR_TRUE = /^(?:true|1|yes|done)$/i;
 const COMPLETED_ATTR_FALSE = /^(?:false|0|no|undone)$/i;

@@ -93,6 +93,16 @@ function homeworkStatusFromResult(result) {
   return "failed";
 }
 
+function taskKeyOf(task) {
+  return task?.key ?? task?.taskKey ?? null;
+}
+
+function addCompletedTaskKeys(progress, task) {
+  const key = taskKeyOf(task);
+  const keys = Array.isArray(progress?.completedTaskKeys) ? progress.completedTaskKeys : [];
+  return key == null || keys.includes(key) ? keys : [...keys, key];
+}
+
 function toMemoLesson(catalogLesson) {
   return {
     knowledgeId: catalogLesson.knowledgeId,
@@ -160,6 +170,7 @@ async function playVideoTask({
   course,
   lesson,
   task,
+  taskKey = taskKeyOf(task),
   store,
   config,
   now,
@@ -220,7 +231,15 @@ async function playVideoTask({
       },
     });
     await store.mutate((state) =>
-      setLessonVideo(state, course, lesson, { status: "done", lastError: null }, now),
+      setLessonVideo(
+        state,
+        course,
+        lesson,
+        { status: "pending", lastError: null, completedTaskKeys: addCompletedTaskKeys(state.courses
+          .find((candidate) => makeCourseKey(candidate) === makeCourseKey(course))?.lessons
+          .find((candidate) => String(candidate.knowledgeId) === String(lesson.knowledgeId))?.video, task) },
+        now,
+      ),
     );
     return true;
   } catch (error) {
@@ -249,6 +268,7 @@ async function handleHomeworkTask({
   lesson,
   memoLesson,
   task,
+  taskKey = taskKeyOf(task),
   store,
   config,
   dryRun,
@@ -296,7 +316,14 @@ async function handleHomeworkTask({
 
     if (platformState === "submitted") {
       await store.mutate((state) =>
-        setLessonHomework(state, course, lesson, { status: "submitted", lastError: null, trials }, now),
+        setLessonHomework(state, course, lesson, {
+          status: "pending",
+          lastError: null,
+          trials,
+          completedTaskKeys: addCompletedTaskKeys(state.courses
+            .find((candidate) => makeCourseKey(candidate) === makeCourseKey(course))?.lessons
+            .find((candidate) => String(candidate.knowledgeId) === String(lesson.knowledgeId))?.homework, task),
+        }, now),
       );
       return true;
     }
@@ -364,14 +391,22 @@ async function handleHomeworkTask({
 
     const status = homeworkStatusFromResult(result);
     const patch = {
-      status,
+      status: ["submitted", "dry_run"].includes(status) ? "pending" : status,
       lastError: ["submitted", "dry_run"].includes(status) ? null : result.detail,
       trials,
     };
+    const taskSucceeded = ["submitted", "dry_run"].includes(status);
     if (["submitted", "dry_run"].includes(status) && Array.isArray(result.answers)) {
       patch.lastAnswers = result.answers;
     }
-    await store.mutate((state) => setLessonHomework(state, course, lesson, patch, now));
+    await store.mutate((state) => {
+      if (taskSucceeded) {
+        patch.completedTaskKeys = addCompletedTaskKeys(state.courses
+          .find((candidate) => makeCourseKey(candidate) === makeCourseKey(course))?.lessons
+          .find((candidate) => String(candidate.knowledgeId) === String(lesson.knowledgeId))?.homework, task);
+      }
+      return setLessonHomework(state, course, lesson, patch, now);
+    });
     return status === "submitted" || status === "dry_run";
   }
 
@@ -428,6 +463,27 @@ export async function processLesson({
 
   const videoTasks = tasks.filter((task) => task.kind === "video");
   const homeworkTasks = tasks.filter((task) => task.kind === "assessment");
+  const videoCompleted = new Set(memoLesson.video?.completedTaskKeys ?? []);
+  const homeworkCompleted = new Set(memoLesson.homework?.completedTaskKeys ?? []);
+  const allTasksCompleted = (taskList, completed) =>
+    taskList.every((task) => {
+      const key = taskKeyOf(task);
+      return key != null && completed.has(key);
+    });
+  const persistTaskSuccess = async (kind, task, status = "pending") => {
+    const key = taskKeyOf(task);
+    if (key == null) return;
+    const completed = kind === "video" ? videoCompleted : homeworkCompleted;
+    if (completed.has(key)) return;
+    completed.add(key);
+    await store.mutate((state) => {
+      const setter = kind === "video" ? setLessonVideo : setLessonHomework;
+      return setter(state, course, lesson, {
+        status,
+        completedTaskKeys: [...completed],
+      }, now);
+    });
+  };
 
   if (videoTasks.length === 0 && memoLesson.video?.status !== "none") {
     await store.mutate((state) =>
@@ -449,12 +505,14 @@ export async function processLesson({
     homeworkNeedsWork(memoLesson.homework, { submitDryRun: !dryRun })
   ) {
     for (const task of homeworkTasks) {
+      if (homeworkCompleted.has(taskKeyOf(task))) continue;
       const ok = await runHomeworkTask({
         page,
         course,
         lesson,
         memoLesson,
         task,
+        taskKey: taskKeyOf(task),
         store,
         config,
         dryRun,
@@ -466,6 +524,16 @@ export async function processLesson({
         homeworkResult = { success: false, detail: `作业“${task.title}”处理失败` };
         break;
       }
+      await persistTaskSuccess("homework", task);
+    }
+    if (homeworkResult.success && allTasksCompleted(homeworkTasks, homeworkCompleted)) {
+      await store.mutate((state) =>
+        setLessonHomework(state, course, lesson, {
+          status: dryRun ? "dry_run" : "submitted",
+          lastError: null,
+          completedTaskKeys: [...homeworkCompleted],
+        }, now),
+      );
     }
   }
   if (!homeworkResult.success) {
@@ -476,12 +544,14 @@ export async function processLesson({
   const order = lessonExecutionOrder({ phase, homeworkResult, videoTaskCount: videoTasks.length });
   if (order.includes("video") && videoNeedsWork(memoLesson.video)) {
     for (const task of videoTasks) {
+      if (videoCompleted.has(taskKeyOf(task))) continue;
       const taskPointReader = () => readTaskPointState(page, task);
       const ok = await runVideoTask({
         page,
         course,
         lesson,
         task,
+        taskKey: taskKeyOf(task),
         store,
         config,
         now,
@@ -494,6 +564,16 @@ export async function processLesson({
       if (!ok) {
         return { status: "failed", detail: `视频“${task.title}”处理失败` };
       }
+      await persistTaskSuccess("video", task);
+    }
+    if (allTasksCompleted(videoTasks, videoCompleted)) {
+      await store.mutate((state) =>
+        setLessonVideo(state, course, lesson, {
+          status: "done",
+          lastError: null,
+          completedTaskKeys: [...videoCompleted],
+        }, now),
+      );
     }
   }
 

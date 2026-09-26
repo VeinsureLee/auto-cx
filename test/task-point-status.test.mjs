@@ -16,7 +16,8 @@ test("parses explicit completion markers as completed", () => {
   assert.equal(parseTaskPointState({ className: "ans-job-icon ans-job-icon-done" }), "completed");
 });
 
-test("unknown task-point DOM is unavailable, never completed", () => {
+test("condition text alone is unavailable, never completed", () => {
+  assert.equal(parseTaskPointState({ text: "完成条件：观看时长需 ≥ 总时长的 90%" }), "unavailable");
   assert.equal(parseTaskPointState({ text: "观看时长需 ≥ 总时长的 90%" }), "unavailable");
 });
 
@@ -172,6 +173,21 @@ test("readTaskPointState reads pending tip text within the matched task tab", as
   assert.match(result.conditionText, /任务点未完成/);
   assert.match(result.conditionText, /90%/);
   assert.equal(result.source, ".jobUnfinish");
+});
+
+test("readTaskPointState does not treat condition candidate text as completion", async () => {
+  const condition = fakeElement({
+    attributes: { class: "jobFinish" },
+    text: "完成条件：观看时长需 ≥ 总时长的 90%",
+  });
+  const tab = fakeElement({
+    attributes: { id: "dct2", title: "视频 2" },
+    children: { ".jobFinish": [condition] },
+  });
+
+  const result = await readTaskPointState(fakePage([tab]), { tabId: "dct2", ordinal: 1 });
+
+  assert.equal(result.state, "unavailable");
 });
 
 test("readTaskPointState reads completion from the task-point icon class", async () => {

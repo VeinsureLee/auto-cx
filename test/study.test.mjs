@@ -447,3 +447,33 @@ test("processLesson does not replay a video already done", async () => {
   assert.equal(result.status, "done");
   assert.deepEqual(harness.calls, ["homework:作业"]);
 });
+
+test("processLesson resumes remaining video tasks without aggregate completion", async () => {
+  const tasks = [makeTask("video", "视频一", 1), makeTask("video", "视频二", 2)];
+  const harness = createLessonHarness({ tasks, phase: "video" });
+  harness.state.courses[0].lessons[0].video.completedTaskKeys = ["video-1"];
+  assert.equal(harness.state.courses[0].lessons[0].video.status, "pending");
+  const runVideoTask = async ({ task }) => {
+    harness.calls.push(`video:${task.title}`);
+    return true;
+  };
+
+  assert.equal((await harness.run({ runVideoTask })).status, "done");
+  assert.deepEqual(harness.calls, ["video:视频二"]);
+  assert.equal(harness.state.courses[0].lessons[0].video.status, "done");
+});
+
+test("processLesson resumes remaining homework tasks without aggregate submission", async () => {
+  const tasks = [makeTask("assessment", "作业一", 1), makeTask("assessment", "作业二", 2)];
+  const harness = createLessonHarness({ tasks, phase: "homework" });
+  harness.state.courses[0].lessons[0].homework.completedTaskKeys = ["assessment-1"];
+  assert.equal(harness.state.courses[0].lessons[0].homework.status, "pending");
+  const runHomeworkTask = async ({ task }) => {
+    harness.calls.push(`homework:${task.title}`);
+    return true;
+  };
+
+  assert.equal((await harness.run({ runHomeworkTask })).status, "done");
+  assert.deepEqual(harness.calls, ["homework:作业二"]);
+  assert.equal(harness.state.courses[0].lessons[0].homework.status, "submitted");
+});
