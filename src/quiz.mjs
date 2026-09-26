@@ -125,6 +125,10 @@ export async function collectQuestions(frame) {
           essayTextareaSel,
         } = selectors;
         const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+        const normalizeOptionText = (value) =>
+          normalize(value).replace(/^(?:\([A-Za-z0-9]\)|[A-Za-z0-9][.、)）])\s*/, "");
+        const normalizeOptionLabel = (marker, content) =>
+          normalizeOptionText(`${normalize(marker)} ${normalize(content)}`);
 
         return blocks.map((block) => {
           const qtypeValue = block.getAttribute("data");

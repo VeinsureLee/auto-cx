@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   classifyQuestionType,
+  collectQuestions,
   mapQType,
   normalizeOptionText,
   normalizeQuestionStem,
@@ -40,6 +41,55 @@ test("normalizes the actual Chaoxing stem content instead of only the question-t
 
 test("normalizes option text from the anchor content used by the answer page", () => {
   assert.equal(normalizeOptionLabel("A、", "“第一本护照”"), "“第一本护照”");
+});
+
+test("collectQuestions runs its text normalization inside the page evaluation context", async () => {
+  const makeElement = ({ textContent = "", children = {}, lists = {} } = {}) => ({
+    textContent,
+    querySelector(selector) {
+      return children[selector] ?? null;
+    },
+    querySelectorAll(selector) {
+      return lists[selector] ?? [];
+    },
+    getAttribute() {
+      return null;
+    },
+  });
+  const marker = makeElement({ textContent: "A、" });
+  const anchor = makeElement({ textContent: "“第一本护照”" });
+  const item = makeElement({
+    children: {
+      ".num_option, i.fl": marker,
+      "a.after, a": anchor,
+    },
+  });
+  const stemContent = makeElement({ textContent: "【单选题】创业教育被称为教育的（）。" });
+  const stem = makeElement({
+    children: {
+      ".qtContent": stemContent,
+      ".newZy_TItle": makeElement({ textContent: "【单选题】" }),
+      p: null,
+    },
+  });
+  const block = makeElement({
+    children: { ".Zy_TItle": stem },
+    lists: { "ul.Zy_ulTop li": [item] },
+  });
+  const frame = {
+    locator() {
+      return {
+        evaluateAll(callback, selectors) {
+          // Simulate Playwright's isolated page context: outer Node bindings are unavailable.
+          return Function("callback", "blocks", "selectors", "return (" + callback.toString() + ")(blocks, selectors);")(callback, [block], selectors);
+        },
+      };
+    },
+  };
+
+  const [question] = await collectQuestions(frame);
+  assert.equal(question.stem, "创业教育被称为教育的（）。");
+  assert.deepEqual(question.options, [{ data: "", text: "“第一本护照”" }]);
 });
 
 test("classifyQuestionType detects multi from checkboxes", () => {
