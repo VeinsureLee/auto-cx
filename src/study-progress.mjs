@@ -366,7 +366,9 @@ export class StudyProgress {
       ? "任务点已完成"
       : worker.taskPointState === "pending"
         ? "任务点未完成"
-        : "任务点状态未知";
+        : worker.taskPointState === "unavailable"
+          ? "任务点不可用"
+          : "任务点状态未知";
     if (worker.taskPointState === "completed" ||
         (worker.status === "done" && worker.taskPointState !== "pending")) {
       return `${text} ${percent}%  ${taskPointLabel}`;

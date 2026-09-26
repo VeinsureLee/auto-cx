@@ -172,7 +172,7 @@ test("StudyProgress clamps each TTY row to the available terminal columns", () =
 });
 
 test("StudyProgress video updates accept task-point state alongside media percent", () => {
-  const stream = memoryStream(false);
+  const stream = memoryStream(true);
   const progress = new StudyProgress({ stream, errorStream: stream });
   progress.startCourse({ name: "课程", total: 1, concurrency: 1 });
   progress.assign(1, { lessonTitle: "1.1 第一节" });
@@ -183,8 +183,9 @@ test("StudyProgress video updates accept task-point state alongside media percen
   progress.video(1, { currentTime: 100, duration: 100, targetSeconds: 100, speed: 2, taskPointState: "unavailable" });
   progress.stop();
 
-  assert.match(stream.output(), /视频进度 100%/);
-  assert.doesNotMatch(stream.output(), /\u001b\[/);
+  assert.match(stream.output(), /任务点不可用/);
+  assert.match(stream.output(), /100%/);
+  assert.doesNotMatch(stream.output(), /视频已完成/);
 });
 
 test("progress display distinguishes media completion from task-point state", () => {

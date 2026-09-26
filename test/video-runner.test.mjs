@@ -15,6 +15,7 @@ test("playManifestVideo reports popup quiz handling before and result after quiz
       order.push("wait");
       assert.equal(mediaType, "video");
       assert.equal(timeoutMs, 1_000);
+      assert.equal(options.targetPercent, undefined, "legacy videoTargetPercent must not reach the normal runner");
       await options.onTick();
       return {
         status: "reached_target",
