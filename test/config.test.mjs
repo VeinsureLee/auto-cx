@@ -231,6 +231,24 @@ test("readConfig accepts study concurrency up to three", () => {
   assert.equal(config.studyConcurrency, 3);
 });
 
+test("readConfig lets an explicit CLI concurrency replace malformed study env while validating other env", () => {
+  const config = readConfig({ CHAOXING_STUDY_CONCURRENCY: "not-an-integer" }, "C:\\workspace", {
+    requireCredentials: false,
+    studyConcurrencyOverride: 2,
+  });
+  assert.equal(config.studyConcurrency, 2);
+  assert.throws(
+    () => readConfig({
+      CHAOXING_STUDY_CONCURRENCY: "not-an-integer",
+      CHAOXING_TIMEOUT_MS: "bad",
+    }, "C:\\workspace", {
+      requireCredentials: false,
+      studyConcurrencyOverride: 2,
+    }),
+    /CHAOXING_TIMEOUT_MS/,
+  );
+});
+
 test("readConfig rejects study concurrency outside one through three", () => {
   assert.throws(
     () => readConfig({ CHAOXING_STUDY_CONCURRENCY: "0" }, process.cwd(), { requireCredentials: false }),

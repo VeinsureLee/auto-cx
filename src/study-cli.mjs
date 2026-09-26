@@ -119,8 +119,14 @@ async function main() {
   const courseArgs = collectCourseArgs(process.argv);
   const lessonArgs = collectLessonArgs(process.argv);
   const phase = collectPhaseArg(process.argv);
-  const config = readConfig(process.env, process.cwd(), { requireCredentials: false });
-  const concurrency = collectConcurrencyArg(process.argv, config.studyConcurrency);
+  const cliConcurrency = process.argv.includes("--concurrency")
+    ? collectConcurrencyArg(process.argv)
+    : null;
+  const config = readConfig(process.env, process.cwd(), {
+    requireCredentials: false,
+    ...(cliConcurrency === null ? {} : { studyConcurrencyOverride: cliConcurrency }),
+  });
+  const concurrency = cliConcurrency ?? config.studyConcurrency;
   const coursesQuery = courseArgs.length ? courseArgs : config.studyCourses;
   const lessonsQuery = lessonArgs.length ? lessonArgs : null;
 
@@ -161,7 +167,10 @@ if (IS_MAIN) {
   main().catch(async (error) => {
     if (error.studyReport) {
       try {
-        const config = readConfig(process.env, process.cwd(), { requireCredentials: false });
+        const config = readConfig(process.env, process.cwd(), {
+          requireCredentials: false,
+          studyConcurrencyOverride: 1,
+        });
         await writeStudyReport(error.studyReport, config);
         console.error("失败现场已写入学习报告。");
       } catch (reportError) {

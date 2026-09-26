@@ -179,13 +179,21 @@ export function readConfig(env = process.env, cwd = process.cwd(), options = {})
     progressPath,
     storageStatePath,
     studyCourses: parseList(env.CHAOXING_STUDY_COURSES),
-    studyConcurrency: parseIntegerInRange(
-      env.CHAOXING_STUDY_CONCURRENCY,
-      DEFAULT_STUDY_CONCURRENCY,
-      1,
-      3,
-      "CHAOXING_STUDY_CONCURRENCY",
-    ),
+    studyConcurrency: options.studyConcurrencyOverride === undefined
+      ? parseIntegerInRange(
+          env.CHAOXING_STUDY_CONCURRENCY,
+          DEFAULT_STUDY_CONCURRENCY,
+          1,
+          3,
+          "CHAOXING_STUDY_CONCURRENCY",
+        )
+      : parseIntegerInRange(
+          options.studyConcurrencyOverride,
+          DEFAULT_STUDY_CONCURRENCY,
+          1,
+          3,
+          "--concurrency",
+        ),
     studyMemoMarkdownPath,
     studyMemoPath,
     studyReportMarkdownPath,

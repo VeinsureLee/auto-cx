@@ -114,6 +114,36 @@ test("runDynamicWorkerPool isolates item failures and continues remaining work",
   assert.equal(settled.find((entry) => entry.item === "good").status, "fulfilled");
 });
 
+test("runDynamicWorkerPool stops dispatching after a fatal worker error and drains active workers", async () => {
+  const started = [];
+  const settled = [];
+  let releaseSecond;
+  const secondFinished = new Promise((resolve) => { releaseSecond = resolve; });
+
+  const run = runDynamicWorkerPool({
+    concurrency: 2,
+    keyOf: (item) => item,
+    loadCandidates: ({ activeIds, attemptedIds }) =>
+      ["browser-lost", "in-flight", "must-not-start"]
+        .filter((item) => !activeIds.has(item) && !attemptedIds.has(item)),
+    runItem: async (item) => {
+      started.push(item);
+      if (item === "browser-lost") throw new Error("browser disconnected");
+      if (item === "in-flight") await secondFinished;
+      return item;
+    },
+    isFatalError: (error) => /browser disconnected/.test(error.message),
+    onSettled: (entry) => settled.push(entry.item),
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(started.sort(), ["browser-lost", "in-flight"]);
+  releaseSecond();
+  await assert.rejects(run, /browser disconnected/);
+  assert.deepEqual(started.sort(), ["browser-lost", "in-flight"]);
+  assert.deepEqual(settled, ["in-flight"]);
+});
+
 test("runDynamicWorkerPool does not double-dispatch an already active candidate", async () => {
   const started = [];
   await runDynamicWorkerPool({

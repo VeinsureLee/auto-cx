@@ -129,6 +129,26 @@ test("StudyProgress redraw clears stale line content when a slot shrinks", () =>
   assert.doesNotMatch(screen, /旧课节标题/);
 });
 
+test("StudyProgress records SIGINT as orderly cancellation instead of terminating the process", () => {
+  const stream = memoryStream(true);
+  let receivedSignal = null;
+  const progress = new StudyProgress({
+    stream,
+    errorStream: stream,
+    redrawIntervalMs: 0,
+    onSignal: (signal) => { receivedSignal = signal; },
+  });
+
+  progress.requestStop("SIGINT");
+
+  assert.equal(receivedSignal, "SIGINT");
+  assert.equal(progress.interrupted, true);
+  assert.match(progress.interruptionError.message, /SIGINT/);
+  assert.equal((stream.output().match(/\u001b\[\?25h/g) ?? []).length, 1);
+  progress.stop();
+  assert.equal((stream.output().match(/\u001b\[\?25h/g) ?? []).length, 1);
+});
+
 test("StudyProgress stop is idempotent and restores the cursor once", () => {
   const stream = memoryStream(true);
   const progress = new StudyProgress({ stream, errorStream: stream, redrawIntervalMs: 0 });
@@ -137,6 +157,18 @@ test("StudyProgress stop is idempotent and restores the cursor once", () => {
   progress.stop();
 
   assert.equal((stream.output().match(/\u001b\[\?25h/g) ?? []).length, 1);
+});
+
+test("StudyProgress clamps each TTY row to the available terminal columns", () => {
+  const stream = memoryStream(true);
+  stream.columns = 24;
+  const progress = new StudyProgress({ stream, errorStream: stream, redrawIntervalMs: 0 });
+  progress.startCourse({ name: "课程名称很长很长很长很长很长", total: 1, concurrency: 1 });
+  progress.assign(1, { lessonTitle: "一个非常非常长的课节标题，不能让终端换行" });
+  progress.stage(1, { name: "homework", detail: "这是一个特别长的作业处理详情文本" });
+
+  assert.ok(progress.buildLines().every((line) => line.length <= 24));
+  progress.stop();
 });
 
 test("StudyProgress shows popup quiz and homework retry stages for a page", () => {

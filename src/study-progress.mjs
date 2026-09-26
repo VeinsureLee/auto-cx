@@ -5,6 +5,34 @@ const SHOW_CURSOR = "\u001b[?25h";
 const DEFAULT_BAR_WIDTH = 20;
 const DEFAULT_REDRAW_INTERVAL_MS = 100;
 
+function characterWidth(character) {
+  if (/[\u0300-\u036f\ufe00-\ufe0f]/u.test(character)) return 0;
+  return /[\u1100-\u115f\u2329\u232a\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6\u{1f300}-\u{1faff}]/u.test(character)
+    ? 2
+    : 1;
+}
+
+function clampLine(line, columns) {
+  const maximum = Math.max(1, Math.floor(columns) - 1);
+  let width = 0;
+  let result = "";
+  for (const character of line) {
+    const nextWidth = characterWidth(character);
+    if (width + nextWidth > maximum) break;
+    result += character;
+    width += nextWidth;
+  }
+  if (result.length < line.length && maximum > 1) {
+    while (width + 1 > maximum && result.length) {
+      const last = [...result].at(-1);
+      result = [...result].slice(0, -1).join("");
+      width -= characterWidth(last);
+    }
+    result += "…";
+  }
+  return result;
+}
+
 const STAGE_LABELS = new Map([
   ["open", "打开页面"],
   ["tasks", "发现任务"],
@@ -81,6 +109,7 @@ export class StudyProgress {
     stream = process.stdout,
     errorStream = process.stderr,
     redrawIntervalMs = DEFAULT_REDRAW_INTERVAL_MS,
+    onSignal = null,
   } = {}) {
     this.stream = stream;
     this.errorStream = errorStream;
@@ -97,12 +126,12 @@ export class StudyProgress {
     this.renderedLines = 0;
     this.cursorHidden = false;
     this.stopped = false;
+    this.interrupted = false;
+    this.interruptionError = null;
+    this.onSignal = onSignal;
     this.renderTimer = null;
     this.signalHandlers = new Map(
-      ["SIGINT", "SIGTERM"].map((signal) => [signal, () => {
-        this.stop();
-        process.kill(process.pid, signal);
-      }]),
+      ["SIGINT", "SIGTERM"].map((signal) => [signal, () => this.requestStop(signal)]),
     );
     for (const [signal, handler] of this.signalHandlers) process.once(signal, handler);
   }
@@ -211,6 +240,14 @@ export class StudyProgress {
     this.writeMessage(this.errorStream, message);
   }
 
+  requestStop(signal) {
+    if (this.interrupted) return;
+    this.interrupted = true;
+    this.interruptionError = new Error(`学习任务收到 ${signal}，已请求停止。`);
+    this.stop();
+    this.onSignal?.(signal);
+  }
+
   stop() {
     if (this.stopped) return;
     this.stopped = true;
@@ -310,7 +347,10 @@ export class StudyProgress {
       const videoLine = this.buildVideoLine(worker);
       if (videoLine) lines.push(`        ${videoLine}`);
     }
-    return lines;
+    const columns = Number(this.stream?.columns);
+    return this.isTTY && Number.isFinite(columns) && columns > 0
+      ? lines.map((line) => clampLine(line, columns))
+      : lines;
   }
 
   buildVideoLine(worker) {

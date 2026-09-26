@@ -96,7 +96,16 @@ export function selectEligibleLessons({
     .slice(0, limit);
 }
 
-export async function runDynamicWorkerPool({ concurrency, loadCandidates, runItem, keyOf, onSettled }) {
+export async function runDynamicWorkerPool({
+  concurrency,
+  loadCandidates,
+  runItem,
+  keyOf,
+  onSettled,
+  isFatalError = () => false,
+  shouldStop = () => false,
+  getStopError = () => new Error("Worker pool stopped."),
+}) {
   const settled = [];
   const active = new Map();
   const activeIds = new Set();
@@ -105,9 +114,21 @@ export async function runDynamicWorkerPool({ concurrency, loadCandidates, runIte
   let catalogError = null;
   let settlementFailed = false;
   let settlementError = null;
+  let fatalFailed = false;
+  let fatalError = null;
+
+  function stopped() {
+    if (fatalFailed) return true;
+    if (!shouldStop()) return false;
+    if (!fatalFailed) {
+      fatalFailed = true;
+      fatalError = getStopError();
+    }
+    return true;
+  }
 
   async function takeCandidate() {
-    if (catalogFailed) {
+    if (catalogFailed || stopped()) {
       return null;
     }
     let candidates;
@@ -121,6 +142,7 @@ export async function runDynamicWorkerPool({ concurrency, loadCandidates, runIte
       catalogError = error;
       return null;
     }
+    if (stopped()) return null;
     const items = Array.isArray(candidates) ? candidates : [];
     return (
       items.find((item) => {
@@ -162,6 +184,13 @@ export async function runDynamicWorkerPool({ concurrency, loadCandidates, runIte
     activeIds.delete(winner.result.key);
     attemptedIds.add(winner.result.key);
 
+    if (winner.result.status === "rejected" && isFatalError(winner.result.reason)) {
+      if (!fatalFailed) {
+        fatalFailed = true;
+        fatalError = shouldStop() ? getStopError() : winner.result.reason;
+      }
+    }
+
     const settledEntry =
       winner.result.status === "fulfilled"
         ? {
@@ -176,8 +205,9 @@ export async function runDynamicWorkerPool({ concurrency, loadCandidates, runIte
             slot: winner.slot,
             reason: winner.result.reason,
           };
-    settled.push(settledEntry);
-    if (onSettled) {
+    const reportable = !fatalFailed || winner.result.status === "fulfilled";
+    if (reportable) settled.push(settledEntry);
+    if (reportable && onSettled) {
       try {
         await onSettled(settledEntry);
       } catch (error) {
@@ -188,9 +218,16 @@ export async function runDynamicWorkerPool({ concurrency, loadCandidates, runIte
       }
     }
 
-    await startWorker(winner.slot);
+    if (!stopped()) await startWorker(winner.slot);
   }
 
+  if (shouldStop() && !fatalFailed) {
+    fatalFailed = true;
+    fatalError = getStopError();
+  }
+  if (fatalFailed) {
+    throw fatalError;
+  }
   if (catalogFailed) {
     throw catalogError;
   }

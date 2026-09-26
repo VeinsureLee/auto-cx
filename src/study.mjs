@@ -512,6 +512,7 @@ async function processAssignedLesson({
 }
 
 async function processCourse({
+  browser,
   context,
   coordinatorPage,
   course,
@@ -526,10 +527,23 @@ async function processCourse({
 }) {
   const workerPages = new Map();
   let courseStarted = false;
+  let browserFailure = null;
+  const onBrowserDisconnected = () => {
+    browserFailure ??= new Error("Chromium 浏览器连接已断开。");
+  };
+  const onContextClosed = () => {
+    if (!progress.interrupted) browserFailure ??= new Error("Chromium 浏览器上下文已关闭。");
+  };
+  browser.on("disconnected", onBrowserDisconnected);
+  context.on("close", onContextClosed);
 
   try {
     await runDynamicWorkerPool({
       concurrency,
+      shouldStop: () => progress.interrupted || browserFailure !== null,
+      getStopError: () => progress.interruptionError ?? browserFailure ?? new Error("学习任务已停止。"),
+      isFatalError: () => progress.interrupted || browserFailure !== null ||
+        browser.isConnected?.() === false || context.isClosed?.() === true,
       keyOf: (lesson) => String(lesson.knowledgeId),
       loadCandidates: async ({ activeIds, attemptedIds }) => {
         const { lessons: catalogLessons } = await openCourseCatalog(
@@ -605,6 +619,8 @@ async function processCourse({
       },
     });
   } finally {
+    browser.removeListener("disconnected", onBrowserDisconnected);
+    context.removeListener("close", onContextClosed);
     await Promise.allSettled(
       [...workerPages.values()].map((page) => page.close().catch(() => {})),
     );
@@ -714,9 +730,12 @@ export async function runStudy({
     courses,
     courseQueries: coursesQuery ?? resolvedConfig.studyCourses,
   });
-  const progress = new StudyProgress();
-
   let browser = null;
+  const progress = new StudyProgress({
+    onSignal: () => {
+      if (browser) void browser.close().catch(() => {});
+    },
+  });
   try {
     browser = await chromium.launch({
       headless: resolvedConfig.headless,
@@ -735,8 +754,10 @@ export async function runStudy({
     page.setDefaultNavigationTimeout(resolvedConfig.timeoutMs);
 
     for (const course of courses) {
+      if (progress.interrupted) throw progress.interruptionError;
       progress.log(`学习课程：${course.name}`);
       await processCourse({
+        browser,
         context,
         coordinatorPage: page,
         course,
@@ -750,6 +771,7 @@ export async function runStudy({
         progress,
       });
     }
+    if (progress.interrupted) throw progress.interruptionError;
 
     return buildStudyReport({
       memo: store.state,
