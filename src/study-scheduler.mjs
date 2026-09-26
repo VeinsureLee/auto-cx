@@ -101,10 +101,13 @@ export async function runDynamicWorkerPool({ concurrency, loadCandidates, runIte
   const active = new Map();
   const activeIds = new Set();
   const attemptedIds = new Set();
+  let catalogFailed = false;
   let catalogError = null;
+  let settlementFailed = false;
+  let settlementError = null;
 
   async function takeCandidate() {
-    if (catalogError) {
+    if (catalogFailed) {
       return null;
     }
     let candidates;
@@ -114,6 +117,7 @@ export async function runDynamicWorkerPool({ concurrency, loadCandidates, runIte
         attemptedIds: new Set(attemptedIds),
       });
     } catch (error) {
+      catalogFailed = true;
       catalogError = error;
       return null;
     }
@@ -174,14 +178,24 @@ export async function runDynamicWorkerPool({ concurrency, loadCandidates, runIte
           };
     settled.push(settledEntry);
     if (onSettled) {
-      await onSettled(settledEntry);
+      try {
+        await onSettled(settledEntry);
+      } catch (error) {
+        if (!settlementFailed) {
+          settlementFailed = true;
+          settlementError = error;
+        }
+      }
     }
 
     await startWorker(winner.slot);
   }
 
-  if (catalogError) {
+  if (catalogFailed) {
     throw catalogError;
+  }
+  if (settlementFailed) {
+    throw settlementError;
   }
   return settled;
 }

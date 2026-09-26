@@ -135,3 +135,80 @@ test("runDynamicWorkerPool settles active workers before rethrowing a loadCandid
   );
   assert.deepEqual(settled.sort(), ["a", "b"]);
 });
+
+async function settleOutcome(promise) {
+  try {
+    const value = await promise;
+    return { rejected: false, value };
+  } catch (error) {
+    return { rejected: true, error };
+  }
+}
+
+test("runDynamicWorkerPool rethrows a falsy loadCandidates error", async () => {
+  for (const thrown of [undefined, null, 0, "", false]) {
+    const outcome = await settleOutcome(
+      runDynamicWorkerPool({
+        concurrency: 1,
+        keyOf: (item) => item,
+        loadCandidates: () => {
+          throw thrown;
+        },
+        runItem: async () => {},
+      }),
+    );
+    assert.equal(outcome.rejected, true, `should reject when loadCandidates throws ${String(thrown)}`);
+    assert.equal(outcome.error, thrown);
+  }
+});
+
+test("runDynamicWorkerPool keeps settling active workers when onSettled throws", async () => {
+  const completed = [];
+  const reported = [];
+  await assert.rejects(
+    runDynamicWorkerPool({
+      concurrency: 2,
+      keyOf: (item) => item,
+      loadCandidates: ({ activeIds, attemptedIds }) =>
+        ["a", "b"].filter((item) => !activeIds.has(item) && !attemptedIds.has(item)),
+      runItem: async (item) => {
+        await new Promise((resolve) => setTimeout(resolve, item === "a" ? 5 : 15));
+        completed.push(item);
+        return item;
+      },
+      onSettled: (entry) => {
+        reported.push(entry.item);
+        throw new Error("onSettled failed");
+      },
+    }),
+    /onSettled failed/,
+  );
+  assert.deepEqual(completed.sort(), ["a", "b"]);
+  assert.deepEqual(reported.sort(), ["a", "b"]);
+});
+
+test("runDynamicWorkerPool rethrows a catalog error even when onSettled later throws", async () => {
+  let calls = 0;
+  let settlements = 0;
+  await assert.rejects(
+    runDynamicWorkerPool({
+      concurrency: 2,
+      keyOf: (item) => item,
+      loadCandidates: () => {
+        calls += 1;
+        if (calls >= 3) throw new Error("catalog failed");
+        return ["a", "b"];
+      },
+      runItem: async (item) => {
+        await new Promise((resolve) => setTimeout(resolve, item === "a" ? 5 : 15));
+        return item;
+      },
+      onSettled: () => {
+        settlements += 1;
+        if (settlements >= 2) throw new Error("onSettled failed");
+      },
+    }),
+    /catalog failed/,
+  );
+  assert.equal(settlements, 2);
+});
