@@ -95,7 +95,7 @@ test("StudyProgress renders one labeled progress row per active page in a TTY", 
 
   assert.match(stream.output(), /页面 1/);
   assert.match(stream.output(), /1\.1 第一节/);
-  assert.match(stream.output(), /50%/);
+  assert.match(stream.output(), /48%/);
   assert.match(stream.output(), /页面 2/);
   assert.match(stream.output(), /正在生成答案/);
 });
@@ -185,6 +185,26 @@ test("StudyProgress video updates accept task-point state alongside media percen
 
   assert.match(stream.output(), /视频进度 100%/);
   assert.doesNotMatch(stream.output(), /\u001b\[/);
+});
+
+test("progress display distinguishes media completion from task-point state", () => {
+  const stream = memoryStream(true);
+  const progress = new StudyProgress({ stream, errorStream: stream, redrawIntervalMs: 0 });
+  progress.startCourse({ name: "课程", total: 1, concurrency: 1 });
+  progress.assign(1, { lessonTitle: "1.1" });
+  progress.stage(1, { name: "video", taskPointState: "pending" });
+  progress.video(1, {
+    currentTime: 100,
+    duration: 100,
+    targetSeconds: 100,
+    speed: 2,
+    taskPointState: "pending",
+  });
+  progress.stop();
+
+  assert.match(stream.output(), /100%/);
+  assert.match(stream.output(), /任务点未完成/);
+  assert.doesNotMatch(stream.output(), /视频已完成/);
 });
 
 test("StudyProgress shows popup quiz and homework retry stages for a page", () => {

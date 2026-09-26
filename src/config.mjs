@@ -9,7 +9,9 @@ const DEFAULT_PROGRESS_CONCURRENCY = 2;
 const DEFAULT_STUDY_CONCURRENCY = 1;
 const DEFAULT_LLM_MODEL = "deepseek-chat";
 const DEFAULT_LLM_BASE_URL = "https://api.deepseek.com";
-const DEFAULT_VIDEO_TARGET_PERCENT = 95;
+// Retained only so older .env files continue to parse; playback no longer uses it.
+const DEFAULT_VIDEO_TARGET_PERCENT = 100;
+const DEFAULT_VIDEO_COMPLETION_SYNC_TIMEOUT_MS = 15_000;
 const DEFAULT_VIDEO_RETRY_LIMIT = 3;
 const DEFAULT_VIDEO_SPEED = 2;
 
@@ -41,6 +43,18 @@ function parseTimeout(value) {
   const timeoutMs = Number(value);
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000) {
     throw new Error("CHAOXING_TIMEOUT_MS 必须是 1000 到 300000 之间的整数。");
+  }
+  return timeoutMs;
+}
+
+function parseCompletionSyncTimeout(value) {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_VIDEO_COMPLETION_SYNC_TIMEOUT_MS;
+  }
+
+  const timeoutMs = Number(value);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000) {
+    throw new Error("CHAOXING_VIDEO_COMPLETION_SYNC_TIMEOUT_MS 必须是 1000 到 300000 之间的整数。");
   }
   return timeoutMs;
 }
@@ -201,6 +215,9 @@ export function readConfig(env = process.env, cwd = process.cwd(), options = {})
     targetCourse: firstNonEmpty(env.CHAOXING_TARGET_COURSE) ?? DEFAULT_TARGET_COURSE,
     targetLesson: firstNonEmpty(env.CHAOXING_TARGET_LESSON) ?? DEFAULT_TARGET_LESSON,
     timeoutMs: parseTimeout(env.CHAOXING_TIMEOUT_MS),
+    completionSyncTimeoutMs: parseCompletionSyncTimeout(
+      env.CHAOXING_VIDEO_COMPLETION_SYNC_TIMEOUT_MS,
+    ),
     videoPreviewSeconds: parsePreviewSeconds(env.CHAOXING_VIDEO_PREVIEW_SECONDS),
     videoRetryLimit: parseIntegerInRange(
       env.CHAOXING_VIDEO_RETRY_LIMIT,

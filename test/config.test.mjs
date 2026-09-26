@@ -86,7 +86,8 @@ test("readConfig reads the auto-study settings with defaults", () => {
     config.studyMemoMarkdownPath,
     path.resolve("C:\\workspace", "artifacts/study-memo.md"),
   );
-  assert.equal(config.videoTargetPercent, 95);
+  assert.equal(config.videoTargetPercent, 100); // legacy compatibility only; playback uses media/task-point state
+  assert.equal(config.completionSyncTimeoutMs, 15_000);
   assert.equal(config.videoRetryLimit, 3);
 });
 
@@ -103,6 +104,7 @@ test("readConfig supports the DeepSeek key aliases and custom study paths", () =
       CHAOXING_STUDY_MEMO_PATH: "output/study-memo.json",
       CHAOXING_STUDY_MEMO_MARKDOWN_PATH: "output/study-memo.md",
       CHAOXING_VIDEO_TARGET_PERCENT: "90",
+      CHAOXING_VIDEO_COMPLETION_SYNC_TIMEOUT_MS: "45000",
       CHAOXING_VIDEO_RETRY_LIMIT: "4",
     },
     "C:\\workspace",
@@ -115,7 +117,8 @@ test("readConfig supports the DeepSeek key aliases and custom study paths", () =
   assert.equal(config.studyReportMarkdownPath, path.resolve("C:\\workspace", "output/study.md"));
   assert.equal(config.studyMemoPath, path.resolve("C:\\workspace", "output/study-memo.json"));
   assert.equal(config.studyMemoMarkdownPath, path.resolve("C:\\workspace", "output/study-memo.md"));
-  assert.equal(config.videoTargetPercent, 90);
+  assert.equal(config.videoTargetPercent, 90); // parsed for old .env files, never a completion control
+  assert.equal(config.completionSyncTimeoutMs, 45_000);
   assert.equal(config.videoRetryLimit, 4);
 });
 
@@ -214,6 +217,15 @@ test("readConfig validates the video target and retry limit", () => {
         CHAOXING_VIDEO_RETRY_LIMIT: "0",
       }),
     /VIDEO_RETRY_LIMIT/,
+  );
+  assert.throws(
+    () =>
+      readConfig({
+        PhoneNumber: "13800138000",
+        Password: "secret",
+        CHAOXING_VIDEO_COMPLETION_SYNC_TIMEOUT_MS: "500",
+      }),
+    /COMPLETION_SYNC_TIMEOUT_MS/,
   );
 });
 

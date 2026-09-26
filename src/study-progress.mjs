@@ -92,6 +92,7 @@ function createWorkerState() {
     currentTime: null,
     duration: null,
     targetSeconds: null,
+    taskPointState: null,
     speed: null,
     status: "running",
     lastMilestone: -1,
@@ -168,6 +169,7 @@ export class StudyProgress {
       ["stage", patch.name],
       ["taskTitle", patch.taskTitle],
       ["detail", patch.detail],
+      ["taskPointState", patch.taskPointState],
     ].filter(([, value]) => value !== undefined);
     let changed = false;
     for (const [key, value] of updates) {
@@ -185,15 +187,18 @@ export class StudyProgress {
     this.requestRender({ force: true });
   }
 
-  video(slot, { currentTime, duration, targetSeconds, speed } = {}) {
+  video(slot, { currentTime, duration, targetSeconds, speed, taskPointState } = {}) {
     const worker = this.workers.get(slot) ?? createWorkerState();
     if (Number.isFinite(currentTime)) worker.currentTime = currentTime;
     if (Number.isFinite(duration)) worker.duration = duration;
     if (Number.isFinite(targetSeconds)) worker.targetSeconds = targetSeconds;
     if (Number.isFinite(speed)) worker.speed = speed;
+    if (taskPointState !== undefined) worker.taskPointState = taskPointState;
     this.workers.set(slot, worker);
 
-    const { percent } = formatProgressBar(worker.currentTime, worker.targetSeconds);
+    // This is media time, not a completion target. Task-point completion is
+    // rendered independently because the platform may sync it after media ends.
+    const { percent } = formatProgressBar(worker.currentTime, worker.duration);
     if (this.isTTY) {
       this.requestRender();
       return;
@@ -354,18 +359,24 @@ export class StudyProgress {
   }
 
   buildVideoLine(worker) {
-    const hasVideo = worker.currentTime !== null || worker.targetSeconds !== null;
+    const hasVideo = worker.currentTime !== null || worker.duration !== null;
     if (!hasVideo) return null;
-    const { percent, text } = formatProgressBar(worker.currentTime, worker.targetSeconds);
-    if (worker.status === "done" || percent >= 100) {
-      return `${text} 视频已完成`;
+    const { percent, text } = formatProgressBar(worker.currentTime, worker.duration);
+    const taskPointLabel = worker.taskPointState === "completed"
+      ? "任务点已完成"
+      : worker.taskPointState === "pending"
+        ? "任务点未完成"
+        : "任务点状态未知";
+    if (worker.taskPointState === "completed" ||
+        (worker.status === "done" && worker.taskPointState !== "pending")) {
+      return `${text} ${percent}%  ${taskPointLabel}`;
     }
-    if (worker.stage !== "video" && worker.stage !== "video-quiz" && !worker.detail) {
-      return `${text} 视频已完成`;
+    if (worker.taskPointState === "unavailable" && percent >= 100) {
+      return `${text} ${percent}%  ${taskPointLabel}`;
     }
     const time = formatMediaTime(worker.currentTime);
     const total = formatMediaTime(worker.duration);
     const speedText = Number.isFinite(worker.speed) ? `  ×${worker.speed}` : "";
-    return `${text} ${percent}%  ${time}/${total}${speedText}`;
+    return `${text} ${percent}%  ${time}/${total}${speedText}  ${taskPointLabel}`;
   }
 }
