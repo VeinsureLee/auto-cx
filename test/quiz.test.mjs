@@ -5,6 +5,8 @@ import {
   classifyQuestionType,
   mapQType,
   normalizeOptionText,
+  normalizeQuestionStem,
+  normalizeOptionLabel,
   shouldSubmit,
 } from "../src/quiz.mjs";
 import { STUDY_SELECTORS } from "../src/study-selectors.mjs";
@@ -27,6 +29,17 @@ test("normalizeOptionText strips the leading option marker", () => {
   assert.equal(normalizeOptionText("C) 风险"), "风险");
   assert.equal(normalizeOptionText(" 创新 "), "创新");
   assert.equal(normalizeOptionText("对"), "对");
+});
+
+test("normalizes the actual Chaoxing stem content instead of only the question-type label", () => {
+  assert.equal(
+    normalizeQuestionStem("【单选题】创业教育被称为教育的（）。", "【单选题】"),
+    "创业教育被称为教育的（）。",
+  );
+});
+
+test("normalizes option text from the anchor content used by the answer page", () => {
+  assert.equal(normalizeOptionLabel("A、", "“第一本护照”"), "“第一本护照”");
 });
 
 test("classifyQuestionType detects multi from checkboxes", () => {

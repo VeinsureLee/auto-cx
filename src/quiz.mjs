@@ -11,6 +11,19 @@ export function normalizeOptionText(text) {
   return normalize(text).replace(/^(?:\([A-Za-z0-9]\)|[A-Za-z0-9][.、)）])\s*/, "");
 }
 
+export function normalizeQuestionStem(content, label = "") {
+  const text = normalize(content);
+  const prefix = normalize(label);
+  if (prefix && text.startsWith(prefix)) {
+    return text.slice(prefix.length).trim();
+  }
+  return text;
+}
+
+export function normalizeOptionLabel(marker, content) {
+  return normalizeOptionText(`${normalize(marker)} ${normalize(content)}`);
+}
+
 // 超星题目 data 属性：0=单选 1=多选 2=填空 3=判断 4=简答
 export function mapQType(code) {
   if (code === null || code === undefined || String(code).trim() === "") {
@@ -105,6 +118,7 @@ export async function collectQuestions(frame) {
           optionMark,
           optionDataAttr,
           stemSel,
+          stemContentSel,
           stemLabelSel,
           stemTextSel,
           fillInputSel,
@@ -115,22 +129,27 @@ export async function collectQuestions(frame) {
         return blocks.map((block) => {
           const qtypeValue = block.getAttribute("data");
           const stemElement = block.querySelector(stemSel);
+          const stemContentElement = stemElement?.querySelector(stemContentSel);
           const stemLabel = normalize(stemElement?.querySelector(stemLabelSel)?.textContent);
-          const stemText = normalize(stemElement?.querySelector(stemTextSel)?.textContent);
-          const stem = `${stemLabel} ${stemText}`.trim();
+          const rawStem = normalize(
+            stemContentElement?.textContent || stemElement?.querySelector(stemTextSel)?.textContent || stemElement?.textContent,
+          );
+          const stem = rawStem.startsWith(stemLabel)
+            ? rawStem.slice(stemLabel.length).trim()
+            : rawStem;
 
           const options = [];
           const optionItems = block.querySelectorAll(optionSel);
           for (const item of optionItems) {
             const mark = item.querySelector(optionMark);
             const data = mark?.getAttribute(optionDataAttr) ?? "";
-            const text = normalize(
-              item.querySelector("a.after")?.textContent ||
-                item.getAttribute("aria-label") ||
-                "",
+            const markerText = normalize(mark?.textContent || item.querySelector("i.fl")?.textContent);
+            const anchorText = normalize(item.querySelector("a.after, a")?.textContent);
+            const text = normalizeOptionText(
+              anchorText || item.getAttribute("aria-label") || item.textContent || "",
             );
             if (text) {
-              options.push({ data, text });
+              options.push({ data, text: normalizeOptionLabel(markerText, text) });
             }
           }
 
@@ -182,6 +201,7 @@ export async function collectQuestions(frame) {
         optionMark: QUIZ.optionMark,
         optionDataAttr: QUIZ.optionDataAttr,
         stemSel: QUIZ.stem,
+        stemContentSel: QUIZ.stemContent,
         stemLabelSel: QUIZ.stemLabel,
         stemTextSel: QUIZ.stemText,
         fillInputSel: QUIZ.fillInput,

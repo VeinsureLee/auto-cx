@@ -65,10 +65,11 @@ export const STUDY_SELECTORS = {
     questionBlock: ".TiMu.newTiMu",
     qTypeAttr: "data", // 0=单选 1=多选 2=填空 3=判断 4=简答
     stem: ".Zy_TItle",
+    stemContent: ".qtContent",
     stemLabel: ".newZy_TItle",
     stemText: "p",
-    optionItem: "ul.Zy_ulTop li[qid]",
-    optionMark: ".num_option",
+    optionItem: "ul.Zy_ulTop li",
+    optionMark: ".num_option, i.fl",
     optionDataAttr: "data",
     fillInput: 'input[type="text"], input[type="number"], input[type="tel"]',
     essayTextarea: "textarea",
