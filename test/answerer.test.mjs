@@ -56,6 +56,22 @@ test("buildPrompt includes every stem and the JSON schema keys", () => {
   assert.ok(prompt.includes("2. [judge]"));
 });
 
+test("buildPrompt lists tried answers so the model avoids them", () => {
+  const prompt = buildPrompt(
+    [{ type: "single", stem: "题干", options: ["甲", "乙"] }],
+    [
+      [{ index: 1, type: "single", selectedIndexes: [1] }],
+      [{ index: 1, type: "single", selectedIndexes: [2] }],
+    ],
+  );
+
+  assert.ok(prompt.includes("错误的答案组合"));
+  assert.ok(prompt.includes("错误尝试 1"));
+  assert.ok(prompt.includes("错误尝试 2"));
+  assert.ok(prompt.includes('"selectedIndexes":[1]'));
+  assert.ok(prompt.includes('"selectedIndexes":[2]'));
+});
+
 test("normalizeAnswer validates and shapes each answer type", () => {
   assert.deepEqual(normalizeAnswer({ index: "1", type: "single", selectedIndexes: [1, 1, 2] }), {
     index: 1,

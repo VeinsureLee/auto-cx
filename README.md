@@ -141,6 +141,7 @@ CHAOXING_DEEPSEEK_API_KEY=sk-你的key
 - `CHAOXING_STUDY_MEMO_PATH=...`：修改学习备忘录 JSON 路径。
 - `CHAOXING_STUDY_MEMO_MARKDOWN_PATH=...`：修改学习备忘录 Markdown 路径。
 - `CHAOXING_VIDEO_TARGET_PERCENT=95`：设置自然播放目标百分比，范围 1 到 100。
+- `CHAOXING_VIDEO_SPEED=2`：设置视频播放倍速，范围 0.5 到 4，默认 2（二倍速）。
 - `CHAOXING_VIDEO_RETRY_LIMIT=3`：设置单个视频每轮重试上限，范围 1 到 10。
 - `CHAOXING_STUDY_COURSES=创新创业`：只学习名称包含该关键字的课程（逗号分隔多个）。
 

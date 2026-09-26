@@ -374,6 +374,7 @@ export async function handleQuizWork({
   dryRun,
   beforeSubmit,
   precomputedAnswers = null,
+  trials = [],
 }) {
   await frame
     .locator(QUIZ.questionBlock)
@@ -392,7 +393,7 @@ export async function handleQuizWork({
   if (Array.isArray(precomputedAnswers) && precomputedAnswers.length) {
     answers = precomputedAnswers;
   } else {
-    const generated = await answerQuestions(questions, config);
+    const generated = await answerQuestions(questions, config, { trials });
     answers = generated.answers;
     partial = generated.partial;
     note = generated.note;
@@ -446,7 +447,7 @@ export async function handleQuizWork({
   if (outcome === "reanswer") {
     return {
       status: "error",
-      detail: "答题错误较多，平台要求重新作答；已清空保存的答案，下次将重新生成",
+      detail: "答题错误较多，平台要求重新作答；将重新生成答案并重试",
       answers,
       submissionStarted: true,
       reanswer: true,
@@ -499,8 +500,19 @@ async function collectVideoQuizQuestions(frame) {
             }
           }
 
+          const checkboxCount = block.querySelectorAll('input[type="checkbox"]').length;
+          let type = "single";
+          if (checkboxCount > 0) {
+            type = "multi";
+          } else if (
+            options.length === 2 &&
+            options.every((option) => /^(对|错|正确|错误|是|否)$/.test(option))
+          ) {
+            type = "judge";
+          }
+
           return {
-            type: block.querySelectorAll('input[type="checkbox"]').length > 0 ? "multi" : "single",
+            type,
             stem,
             options,
             inputCount: 0,
@@ -515,38 +527,19 @@ async function collectVideoQuizQuestions(frame) {
     );
 }
 
-async function fillVideoQuizAnswers(frame, questions, answers) {
-  const answerByIndex = new Map(answers.map((answer) => [answer.index, answer]));
-
-  for (let index = 0; index < questions.length; index += 1) {
-    const answer = answerByIndex.get(index + 1);
-    if (!answer || !Array.isArray(answer.selectedIndexes)) {
-      continue;
-    }
-    const block = frame.locator(STUDY_SELECTORS.videoQuiz.item).nth(index);
-    for (const optionIndex of answer.selectedIndexes) {
-      const option = block.locator(STUDY_SELECTORS.videoQuiz.optionItem).nth(optionIndex - 1);
-      if ((await option.count()) === 0) {
-        continue;
-      }
-      await option.scrollIntoViewIfNeeded();
-      await option.click({ force: true }).catch(() => option.click({ force: true }));
-    }
+async function clickVideoQuizOption(block, optionIndex) {
+  const option = block.locator(STUDY_SELECTORS.videoQuiz.optionItem).nth(optionIndex);
+  if ((await option.count()) === 0) {
+    return false;
   }
-}
-
-async function waitForVideoQuizResult(frame, timeoutMs = 15_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    for (const selector of STUDY_SELECTORS.videoQuiz.resultMarks) {
-      const mark = frame.locator(selector).first();
-      if ((await mark.count()) > 0 && (await mark.isVisible().catch(() => false))) {
-        return selector;
-      }
-    }
-    await frame.waitForTimeout(300);
+  const input = option.locator('input[type="radio"], input[type="checkbox"]').first();
+  if ((await input.count()) > 0) {
+    await input.check({ force: true }).catch(() => input.click({ force: true }));
+  } else {
+    await option.scrollIntoViewIfNeeded();
+    await option.click({ force: true }).catch(() => option.click({ force: true }));
   }
-  return null;
+  return true;
 }
 
 export async function isVideoQuizVisible(frame) {
@@ -558,52 +551,62 @@ export async function isVideoQuizVisible(frame) {
   return (await item.count()) > 0;
 }
 
+async function waitForVideoQuizClosed(frame, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await isVideoQuizVisible(frame))) {
+      return true;
+    }
+    await frame.waitForTimeout(300);
+  }
+  return false;
+}
+
 export async function handleVideoQuizWork({ frame, config }) {
   const questions = await collectVideoQuizQuestions(frame);
   if (!questions.length) {
     return { status: "skipped", detail: "未识别到视频内题目", answers: [] };
   }
 
-  const { answers, partial, note } = await answerQuestions(questions, config);
-  if (!shouldSubmit(questions, answers)) {
-    return {
-      status: "skipped",
-      detail: partial ? `视频内题目未全部获得答案（${note}）` : "视频内题目存在无法自动作答的题型",
-      answers,
-    };
-  }
+  // 视频弹题通常选项少、答错可重选，直接逐个选项暴力尝试，不调用大模型。
+  const answers = [];
+  for (let index = 0; index < questions.length; index += 1) {
+    const question = questions[index];
+    const block = frame.locator(STUDY_SELECTORS.videoQuiz.item).nth(index);
+    let solved = false;
 
-  await fillVideoQuizAnswers(frame, questions, answers);
+    for (let optionIndex = 0; optionIndex < question.options.length; optionIndex += 1) {
+      await clickVideoQuizOption(block, optionIndex);
+      await frame.waitForTimeout(400);
 
-  const submitButton = frame.locator(STUDY_SELECTORS.videoQuiz.submitButton).first();
-  if ((await submitButton.count()) === 0) {
-    return { status: "error", detail: "未找到视频内题目提交按钮", answers };
-  }
-  await submitButton.click({ force: true }).catch(() => submitButton.click());
+      const submitButton = frame.locator(STUDY_SELECTORS.videoQuiz.submitButton).first();
+      if ((await submitButton.count()) === 0) {
+        break;
+      }
+      await submitButton.click({ force: true }).catch(() => submitButton.click());
 
-  const resultMark = await waitForVideoQuizResult(frame);
-  if (!resultMark) {
-    return { status: "error", detail: "未确认视频内题目的作答结果", answers };
-  }
+      // 答对→弹题关闭、视频继续；答错→弹题停留，可继续重选。
+      if (await waitForVideoQuizClosed(frame, 4_000)) {
+        solved = true;
+        answers.push({ index: index + 1, selectedIndexes: [optionIndex + 1] });
+        break;
+      }
+    }
 
-  const continueButton = frame.locator(STUDY_SELECTORS.videoQuiz.continueButton).first();
-  if ((await continueButton.count()) > 0) {
-    await continueButton
-      .waitFor({ state: "visible", timeout: 5_000 })
-      .catch(() => null);
-    if (await continueButton.isVisible().catch(() => false)) {
-      await continueButton.click({ force: true }).catch(() => continueButton.click());
+    if (!solved) {
+      return {
+        status: "skipped",
+        detail: "视频内题目所有选项均尝试失败，未能通过",
+        answers,
+      };
     }
   }
 
-  if (resultMark === STUDY_SELECTORS.videoQuiz.correctMark) {
-    return { status: "answered", detail: "视频内题目回答正确", answers };
+  // 弹题关闭后若仍有“继续”按钮则点一下。
+  const continueButton = frame.locator(STUDY_SELECTORS.videoQuiz.continueButton).first();
+  if ((await continueButton.count()) > 0 && (await continueButton.isVisible().catch(() => false))) {
+    await continueButton.click({ force: true }).catch(() => continueButton.click());
   }
-  return {
-    status: "answered-wrong",
-    detail: resultMark === STUDY_SELECTORS.videoQuiz.wrongBackMark
-      ? "视频内题目回答错误，将回看对应片段"
-      : "视频内题目回答错误",
-    answers,
-  };
+
+  return { status: "answered", detail: "视频内题目已作答", answers };
 }

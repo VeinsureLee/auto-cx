@@ -216,3 +216,25 @@ test("readConfig validates the video target and retry limit", () => {
     /VIDEO_RETRY_LIMIT/,
   );
 });
+
+test("readConfig reads the video speed with a 2x default", () => {
+  assert.equal(
+    readConfig({ PhoneNumber: "13800138000", Password: "secret" }, "C:\\workspace").videoSpeed,
+    2,
+  );
+  assert.equal(
+    readConfig(
+      { PhoneNumber: "13800138000", Password: "secret", CHAOXING_VIDEO_SPEED: "1.5" },
+      "C:\\workspace",
+    ).videoSpeed,
+    1.5,
+  );
+  assert.throws(
+    () =>
+      readConfig(
+        { PhoneNumber: "13800138000", Password: "secret", CHAOXING_VIDEO_SPEED: "5" },
+        "C:\\workspace",
+      ),
+    /VIDEO_SPEED/,
+  );
+});

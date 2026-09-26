@@ -10,6 +10,7 @@ const DEFAULT_LLM_MODEL = "deepseek-chat";
 const DEFAULT_LLM_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_VIDEO_TARGET_PERCENT = 95;
 const DEFAULT_VIDEO_RETRY_LIMIT = 3;
+const DEFAULT_VIDEO_SPEED = 2;
 
 function firstNonEmpty(...values) {
   return values.find((value) => typeof value === "string" && value.trim() !== "")?.trim();
@@ -87,6 +88,18 @@ function parseList(value) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function parseVideoSpeed(value) {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_VIDEO_SPEED;
+  }
+
+  const speed = Number(value);
+  if (!Number.isFinite(speed) || speed < 0.5 || speed > 4) {
+    throw new Error("CHAOXING_VIDEO_SPEED 必须是 0.5 到 4 之间的数字。");
+  }
+  return speed;
 }
 
 function parseHttpUrl(value, fallback, label) {
@@ -187,5 +200,6 @@ export function readConfig(env = process.env, cwd = process.cwd(), options = {})
       100,
       "CHAOXING_VIDEO_TARGET_PERCENT",
     ),
+    videoSpeed: parseVideoSpeed(env.CHAOXING_VIDEO_SPEED),
   };
 }

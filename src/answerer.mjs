@@ -1,6 +1,6 @@
 const DEFAULT_TIMEOUT_MS = 60_000;
 
-export function buildPrompt(questions) {
+export function buildPrompt(questions, trials = []) {
   const lines = [
     "你是这门课程的学习助教。下面给出一些章节测验题目，请逐题给出答案。",
     "要求：只输出一个 JSON 数组，不要输出任何解释或标点外的文字。数组元素格式：",
@@ -11,8 +11,16 @@ export function buildPrompt(questions) {
     "- fill 填空：fillText 填完整答案；若有多个空用中文分号“；”分隔。",
     "- essay 简答：essayText 给一段通顺、切题的答案，100-200字。",
     "- 与本类题型无关的字段一律置 null。",
-    "以下是题目：",
   ];
+  if (Array.isArray(trials) && trials.length) {
+    lines.push(
+      "重要：下面是你之前给出、但已被系统判定为错误的答案组合，请务必给出与它们不同的答案：",
+    );
+    trials.forEach((trial, index) => {
+      lines.push(`  错误尝试 ${index + 1}：${JSON.stringify(trial)}`);
+    });
+  }
+  lines.push("以下是题目：");
 
   questions.forEach((question, index) => {
     lines.push(
@@ -188,12 +196,12 @@ export function normalizeAnswer(answer) {
   return null;
 }
 
-export async function answerQuestions(questions, config) {
+export async function answerQuestions(questions, config, { trials = [] } = {}) {
   if (!questions?.length) {
     return { answers: [], partial: false, note: "没有需要作答的题目" };
   }
 
-  const result = await callChatCompletions(buildPrompt(questions), config);
+  const result = await callChatCompletions(buildPrompt(questions, trials), config);
   if (!result.ok) {
     return { answers: [], partial: true, note: result.note };
   }

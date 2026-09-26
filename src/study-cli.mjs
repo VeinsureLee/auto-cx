@@ -54,6 +54,20 @@ function collectCourseArgs(argv) {
   return values;
 }
 
+function collectLessonArgs(argv) {
+  const values = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === "--lesson") {
+      const chunk = argv[index + 1];
+      if (chunk) {
+        values.push(chunk.trim());
+      }
+      index += 1;
+    }
+  }
+  return values;
+}
+
 export function collectPhaseArg(argv) {
   const indexes = argv
     .map((value, index) => (value === "--phase" ? index : -1))
@@ -88,12 +102,17 @@ export async function writeStudyReport(report, config) {
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const courseArgs = collectCourseArgs(process.argv);
+  const lessonArgs = collectLessonArgs(process.argv);
   const phase = collectPhaseArg(process.argv);
   const config = readConfig(process.env, process.cwd(), { requireCredentials: false });
   const coursesQuery = courseArgs.length ? courseArgs : config.studyCourses;
+  const lessonsQuery = lessonArgs.length ? lessonArgs : null;
 
   if (coursesQuery.length) {
     console.log(`指定课程：${coursesQuery.join("、")}`);
+  }
+  if (lessonsQuery?.length) {
+    console.log(`指定节号：${lessonsQuery.join("、")}`);
   }
   console.log(
     phase === "video"
@@ -105,7 +124,7 @@ async function main() {
           : "自动学习（全自动模式）：逐课节看完视频，再做该课节作业。",
   );
 
-  const report = await runStudy({ dryRun, phase, config, coursesQuery });
+  const report = await runStudy({ dryRun, phase, config, coursesQuery, lessonsQuery });
   await writeStudyReport(report, config);
 
   for (const course of report.courses) {

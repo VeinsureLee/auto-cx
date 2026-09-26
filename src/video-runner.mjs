@@ -16,11 +16,12 @@ export async function playManifestVideo({
   onProgress = async () => {},
   onPopupQuiz = async () => {},
 }) {
-  await startMediaPlayback(frame, "video");
+  await startMediaPlayback(frame, "video", { speed: config.videoSpeed });
   let popupAttempts = 0;
 
   const result = await waitForMediaTarget(frame, "video", config.timeoutMs, {
     targetPercent: config.videoTargetPercent,
+    speed: config.videoSpeed,
     onSample: onProgress,
     onTick: async () => {
       if (!(await isVideoQuizVisible(frame))) {

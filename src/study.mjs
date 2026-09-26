@@ -89,11 +89,83 @@ function toMemoLesson(catalogLesson) {
   return {
     knowledgeId: catalogLesson.knowledgeId,
     title: catalogLesson.label ?? catalogLesson.title,
+    section: catalogLesson.section ?? null,
     ordinal: catalogLesson.ordinal,
     locked: isLockedLesson(catalogLesson),
     catalogCompleted: Boolean(catalogLesson.completed),
     pendingTaskCount: catalogLesson.pendingTaskCount,
   };
+}
+
+function parseSectionNumber(text) {
+  const match = String(text ?? "").trim().match(/^(\d+)(?:\.(\d+))?$/);
+  if (!match) {
+    return null;
+  }
+  return Number(match[1]) * 1000 + (match[2] ? Number(match[2]) : 0);
+}
+
+function lessonSectionKey(lesson) {
+  if (lesson.section) {
+    return parseSectionNumber(lesson.section);
+  }
+  const prefix = String(lesson.title ?? "").match(/^(\d+(?:\.\d+)?)/);
+  return prefix ? parseSectionNumber(prefix[1]) : null;
+}
+
+function lessonIdentity(lesson) {
+  return lesson.knowledgeId ?? `${lesson.ordinal}`;
+}
+
+export function filterLessonsByQuery(lessons, queries) {
+  if (!queries?.length) {
+    return lessons;
+  }
+  const matched = new Set();
+  const parts = queries.flatMap((query) =>
+    String(query ?? "").split(",").map((item) => item.trim()).filter(Boolean),
+  );
+
+  for (const part of parts) {
+    const range = part.match(/^(\d+(?:\.\d+)?)\s*[-~]\s*(\d+(?:\.\d+)?)$/);
+    if (range) {
+      const start = parseSectionNumber(range[1]);
+      const end = parseSectionNumber(range[2]);
+      if (start === null || end === null) {
+        continue;
+      }
+      const low = Math.min(start, end);
+      const high = Math.max(start, end);
+      for (const lesson of lessons) {
+        const key = lessonSectionKey(lesson);
+        if (key !== null && key >= low && key <= high) {
+          matched.add(lessonIdentity(lesson));
+        }
+      }
+      continue;
+    }
+
+    const isChapter = /^\d+$/.test(part);
+    const target = parseSectionNumber(part);
+    if (target === null) {
+      continue;
+    }
+    for (const lesson of lessons) {
+      const key = lessonSectionKey(lesson);
+      if (key === null) {
+        continue;
+      }
+      if (isChapter) {
+        if (Math.floor(key / 1000) === Math.floor(target / 1000)) {
+          matched.add(lessonIdentity(lesson));
+        }
+      } else if (key === target) {
+        matched.add(lessonIdentity(lesson));
+      }
+    }
+  }
+
+  return lessons.filter((lesson) => matched.has(lessonIdentity(lesson)));
 }
 
 export function pickNextLesson(catalogLessons, memoLessons, attempted, phase, dryRun = false) {
@@ -154,6 +226,8 @@ function isDetachedError(error) {
   return /detached|closed|target page/i.test(error?.message ?? String(error ?? ""));
 }
 
+const HOMEWORK_MAX_ATTEMPTS = 3;
+
 async function handleHomeworkTask({
   page,
   course,
@@ -174,13 +248,18 @@ async function handleHomeworkTask({
     return false;
   }
 
-  // 作业最内层 iframe 会经历一次重定向/刷新，frame 引用可能中途失效；
-  // 失效时重新定位作业帧再试，最多 3 次。
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  // 试错表：记录被判错、要求重答的答案组合，下次让大模型避开这些答案。
+  const trials = Array.isArray(memoLesson.homework?.trials)
+    ? memoLesson.homework.trials.slice()
+    : [];
+  const savedAnswers = memoLesson.homework?.lastAnswers ?? null;
+
+  let attempts = 0;
+  while (attempts < HOMEWORK_MAX_ATTEMPTS) {
     const surface = await waitForTaskSurface(page, config.timeoutMs, "assessment", task.title);
     if (!surface) {
       await store.mutate((state) =>
-        setLessonHomework(state, course, lesson, { status: "failed", lastError: `作业“${task.title}”未加载出可见内容` }, now),
+        setLessonHomework(state, course, lesson, { status: "failed", lastError: `作业“${task.title}”未加载出可见内容`, trials }, now),
       );
       return false;
     }
@@ -198,13 +277,13 @@ async function handleHomeworkTask({
 
     if (platformState === "submitted") {
       await store.mutate((state) =>
-        setLessonHomework(state, course, lesson, { status: "submitted", lastError: null }, now),
+        setLessonHomework(state, course, lesson, { status: "submitted", lastError: null, trials }, now),
       );
       return true;
     }
     if (platformState === "captcha") {
       await store.mutate((state) =>
-        setLessonHomework(state, course, lesson, { status: "failed", lastError: "平台要求验证码，请人工完成提交" }, now),
+        setLessonHomework(state, course, lesson, { status: "failed", lastError: "平台要求验证码，请人工完成提交", trials }, now),
       );
       return false;
     }
@@ -214,7 +293,7 @@ async function handleHomeworkTask({
           state,
           course,
           lesson,
-          { status: "uncertain", lastError: "上次提交结果仍无法与平台对账，未盲目重复提交" },
+          { status: "uncertain", lastError: "上次提交结果仍无法与平台对账，未盲目重复提交", trials },
           now,
         ),
       );
@@ -228,8 +307,9 @@ async function handleHomeworkTask({
         page,
         config,
         dryRun,
-        // 真提交时优先复用 dry-run 已保存的答案，避免重新调大模型产生不同答案。
-        precomputedAnswers: dryRun ? null : (memoLesson.homework?.lastAnswers ?? null),
+        // 第一次尝试复用 dry-run 保存的答案；重试时由大模型结合试错表重新生成。
+        precomputedAnswers: attempts === 0 && !dryRun ? savedAnswers : null,
+        trials,
       });
     } catch (error) {
       if (isDetachedError(error)) {
@@ -239,15 +319,26 @@ async function handleHomeworkTask({
       result = { status: "error", detail: error.message ?? String(error) };
     }
 
-    const status = result.reanswer ? "failed" : homeworkStatusFromResult(result);
+    if (result.reanswer) {
+      // 本次答案被判错：记入试错表，换一组答案重试。
+      if (Array.isArray(result.answers)) {
+        trials.push(result.answers);
+      }
+      await store.mutate((state) =>
+        setLessonHomework(state, course, lesson, { status: "failed", lastError: result.detail, trials }, now),
+      );
+      attempts += 1;
+      await page.waitForTimeout(1_500);
+      continue;
+    }
+
+    const status = homeworkStatusFromResult(result);
     const patch = {
       status,
       lastError: ["submitted", "dry_run"].includes(status) ? null : result.detail,
+      trials,
     };
-    if (result.reanswer) {
-      // 答案错误较多被平台要求重答：清掉已存答案，下次重新生成而非复用。
-      patch.lastAnswers = null;
-    } else if (["submitted", "dry_run"].includes(status) && Array.isArray(result.answers)) {
+    if (["submitted", "dry_run"].includes(status) && Array.isArray(result.answers)) {
       patch.lastAnswers = result.answers;
     }
     await store.mutate((state) => setLessonHomework(state, course, lesson, patch, now));
@@ -259,7 +350,7 @@ async function handleHomeworkTask({
       state,
       course,
       lesson,
-      { status: "failed", lastError: "作业帧反复刷新，无法稳定处理，请稍后重试" },
+      { status: "failed", lastError: "多次重答仍被要求重做，请人工处理", trials },
       now,
     ),
   );
@@ -326,7 +417,7 @@ async function processLesson({
   }
 }
 
-async function processCourse({ page, course, store, config, dryRun, phase, now }) {
+async function processCourse({ page, course, store, config, dryRun, phase, now, lessonsQuery }) {
   const attempted = new Set();
 
   for (let round = 0; round < 500; round += 1) {
@@ -343,7 +434,9 @@ async function processCourse({ page, course, store, config, dryRun, phase, now }
       refreshCatalog(state, course, catalogLessons.map(toMemoLesson), now),
     );
 
-    const target = pickNextLesson(catalogLessons, courseRecord.lessons, attempted, phase, dryRun);
+    // 只处理 --lesson 指定的节号范围（如 9.1、9.1-9.5、9=整章）。
+    const workableLessons = filterLessonsByQuery(catalogLessons, lessonsQuery);
+    const target = pickNextLesson(workableLessons, courseRecord.lessons, attempted, phase, dryRun);
     if (!target) {
       break;
     }
@@ -393,12 +486,27 @@ function lessonDetail(lesson) {
   return parts.join("；") || null;
 }
 
+function withSuffix(filePath, suffix) {
+  const dot = filePath.lastIndexOf(".");
+  if (dot <= 0) {
+    return `${filePath}-${suffix}`;
+  }
+  return `${filePath.slice(0, dot)}-${suffix}${filePath.slice(dot)}`;
+}
+
+function lessonWorkerSuffix(lessonsQuery) {
+  const joined = (lessonsQuery ?? []).map(String).join(",");
+  const sanitized = joined.replace(/[^\w.\-~]+/g, "-").replace(/^-+|-+$/g, "");
+  return sanitized || "all";
+}
+
 export function buildStudyReport({
   memo,
   courseIds,
   dryRun,
   requestedPhase = null,
   fatalError = null,
+  lessonsQuery = null,
   generatedAt = new Date().toISOString(),
 }) {
   const selected = new Set(courseIds.map(String));
@@ -417,7 +525,7 @@ export function buildStudyReport({
         courseId: course.courseId,
         clazzId: course.clazzId,
         name: course.name,
-        lessons: (course.lessons ?? []).map((lesson) => ({
+        lessons: filterLessonsByQuery(course.lessons ?? [], lessonsQuery).map((lesson) => ({
           title: lesson.title,
           knowledgeId: lesson.knowledgeId,
           ordinal: lesson.ordinal,
@@ -434,7 +542,7 @@ export function buildStudyReport({
   };
 }
 
-export async function runStudy({ dryRun = false, phase = null, config, coursesQuery } = {}) {
+export async function runStudy({ dryRun = false, phase = null, config, coursesQuery, lessonsQuery = null } = {}) {
   if (![null, "video", "homework"].includes(phase)) {
     throw new Error(`不支持的学习阶段“${phase}”；目前支持 --phase video 或 --phase homework。`);
   }
@@ -442,6 +550,15 @@ export async function runStudy({ dryRun = false, phase = null, config, coursesQu
     config ?? readConfig(process.env, process.cwd(), { requireCredentials: false });
   if (!resolvedConfig.deepseekApiKey) {
     throw new Error("缺少 DeepSeek API Key。请设置 CHAOXING_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY。");
+  }
+
+  // 指定了节号范围时，为每个 worker 派生独立的备忘录/报告文件，避免多进程互相覆盖。
+  if (lessonsQuery?.length) {
+    const suffix = lessonWorkerSuffix(lessonsQuery);
+    resolvedConfig.studyMemoPath = withSuffix(resolvedConfig.studyMemoPath, suffix);
+    resolvedConfig.studyMemoMarkdownPath = withSuffix(resolvedConfig.studyMemoMarkdownPath, suffix);
+    resolvedConfig.studyReportPath = withSuffix(resolvedConfig.studyReportPath, suffix);
+    resolvedConfig.studyReportMarkdownPath = withSuffix(resolvedConfig.studyReportMarkdownPath, suffix);
   }
 
   const courses = await loadSelectedCourses(resolvedConfig, coursesQuery);
@@ -481,6 +598,7 @@ export async function runStudy({ dryRun = false, phase = null, config, coursesQu
         dryRun,
         phase,
         now: Date.now,
+        lessonsQuery,
       });
     }
 
@@ -489,6 +607,7 @@ export async function runStudy({ dryRun = false, phase = null, config, coursesQu
       courseIds,
       dryRun,
       requestedPhase: phase,
+      lessonsQuery,
     });
   } catch (error) {
     const failure = error instanceof Error ? error : new Error(String(error));
@@ -497,6 +616,7 @@ export async function runStudy({ dryRun = false, phase = null, config, coursesQu
       courseIds,
       dryRun,
       requestedPhase: phase,
+      lessonsQuery,
       fatalError: failure.message,
     });
     throw failure;

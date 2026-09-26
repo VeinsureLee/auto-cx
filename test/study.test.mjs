@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { filterCoursesByQuery, pickNextLesson } from "../src/study.mjs";
+import { filterCoursesByQuery, filterLessonsByQuery, pickNextLesson } from "../src/study.mjs";
 
 const courses = [
   { courseId: "1", name: "创新创业基础" },
@@ -117,4 +117,44 @@ test("pickNextLesson submits dry_run lessons on a real run", () => {
   ];
   const target = pickNextLesson(catalogLessons, memoLessons, new Set(), "homework", false);
   assert.equal(target.knowledgeId, "a");
+});
+
+function numberedLesson(section, knowledgeId) {
+  return { knowledgeId, section, title: `${section} 标题`, ordinal: Number(knowledgeId) };
+}
+
+test("filterLessonsByQuery selects by section, range, chapter, and list", () => {
+  const lessons = [
+    numberedLesson("8.5", "801"),
+    numberedLesson("9.1", "901"),
+    numberedLesson("9.2", "902"),
+    numberedLesson("9.5", "905"),
+    numberedLesson("10.2", "1002"),
+    numberedLesson("11.1", "1101"),
+  ];
+
+  assert.deepEqual(filterLessonsByQuery(lessons, ["9.1"]).map((l) => l.knowledgeId), ["901"]);
+  assert.deepEqual(
+    filterLessonsByQuery(lessons, ["9.1-9.5"]).map((l) => l.knowledgeId),
+    ["901", "902", "905"],
+  );
+  assert.deepEqual(filterLessonsByQuery(lessons, ["9"]).map((l) => l.knowledgeId), [
+    "901",
+    "902",
+    "905",
+  ]);
+  assert.deepEqual(
+    filterLessonsByQuery(lessons, ["9.1,10.2"]).map((l) => l.knowledgeId),
+    ["901", "1002"],
+  );
+  assert.equal(filterLessonsByQuery(lessons, []), lessons);
+});
+
+test("filterLessonsByQuery falls back to the title section prefix", () => {
+  const lessons = [
+    { knowledgeId: "1", title: "9.3 标题" },
+    { knowledgeId: "2", title: "10.1 标题" },
+  ];
+  assert.deepEqual(filterLessonsByQuery(lessons, ["9.3"]).map((l) => l.knowledgeId), ["1"]);
+  assert.deepEqual(filterLessonsByQuery(lessons, ["10"]).map((l) => l.knowledgeId), ["2"]);
 });

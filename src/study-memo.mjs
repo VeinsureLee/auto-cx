@@ -141,6 +141,7 @@ function findLessonRecord(courseRecord, lesson) {
 function catalogFields(lesson) {
   return {
     title: String(lesson.title ?? ""),
+    section: lesson.section == null ? null : String(lesson.section),
     ordinal: lesson.ordinal == null ? null : Number(lesson.ordinal),
     locked: Boolean(lesson.locked),
     catalogCompleted: Boolean(lesson.catalogCompleted),
@@ -307,6 +308,7 @@ export function renderStudyMemoMarkdown(memo) {
         lesson.catalogCompleted ? "目录已完成" : "",
         lesson.locked ? "闯关锁定" : "",
         lesson.homework?.lastAnswers?.length ? `已存答案 ${lesson.homework.lastAnswers.length} 题` : "",
+        lesson.homework?.trials?.length ? `试错 ${lesson.homework.trials.length} 次` : "",
         lesson.video?.lastError ? `视频：${lesson.video.lastError}` : "",
         lesson.homework?.lastError ? `作业：${lesson.homework.lastError}` : "",
       ]

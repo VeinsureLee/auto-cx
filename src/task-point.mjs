@@ -60,6 +60,7 @@ export async function waitForMediaTarget(frame, mediaType, metadataTimeoutMs, op
   const pollIntervalMs = options.pollIntervalMs ?? MEDIA_POLL_INTERVAL_MS;
   const stallTimeoutMs = options.stallTimeoutMs ?? MEDIA_STALL_TIMEOUT_MS;
   const targetPercent = options.targetPercent ?? 100;
+  const speed = options.speed ?? 1;
   const metadataDeadline = now() + metadataTimeoutMs;
   let lastCurrentTime = null;
   let lastProgressAt = now();
@@ -78,6 +79,18 @@ export async function waitForMediaTarget(frame, mediaType, metadataTimeoutMs, op
 
     const state = await readMediaState(frame, mediaType);
     const sampledAt = now();
+    if (speed !== 1) {
+      // 持续保持倍速，避免平台/播放器把 playbackRate 重置回 1。
+      await frame
+        .locator(mediaType)
+        .first()
+        .evaluate((element, rate) => {
+          if (element.playbackRate !== rate) {
+            element.playbackRate = rate;
+          }
+        }, speed)
+        .catch(() => {});
+    }
     if (state === null || !state.duration || state.duration <= 0) {
       if (sampledAt >= metadataDeadline) {
         return { status: "error", detail: "等待媒体元数据加载超时" };
@@ -135,7 +148,7 @@ export async function waitForMediaReady(frame, mediaType, timeoutMs = 15_000) {
   await media.waitFor({ state: "attached", timeout: timeoutMs });
 }
 
-export async function startMediaPlayback(frame, mediaType = "video") {
+export async function startMediaPlayback(frame, mediaType = "video", { speed = 1 } = {}) {
   await waitForMediaReady(frame, mediaType);
   const media = frame.locator(mediaType).first();
 
@@ -151,5 +164,13 @@ export async function startMediaPlayback(frame, mediaType = "video") {
   const state = await readMediaState(frame, mediaType);
   if (!state || state.paused) {
     await media.evaluate((element) => element.play?.().catch(() => {})).catch(() => {});
+  }
+
+  if (speed !== 1) {
+    await media
+      .evaluate((element, rate) => {
+        element.playbackRate = rate;
+      }, speed)
+      .catch(() => {});
   }
 }
