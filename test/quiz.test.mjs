@@ -7,6 +7,7 @@ import {
   normalizeOptionText,
   shouldSubmit,
 } from "../src/quiz.mjs";
+import { STUDY_SELECTORS } from "../src/study-selectors.mjs";
 
 test("mapQType maps Chaoxing question type codes", () => {
   assert.equal(mapQType("0"), "single");
@@ -67,6 +68,11 @@ test("classifyQuestionType detects fill from free inputs", () => {
 
 test("classifyQuestionType falls back to other for unrecognized blocks", () => {
   assert.equal(classifyQuestionType({}), "other");
+});
+
+test("videoQuiz selectors no longer define a cumulative attempt cap", () => {
+  // 整段视频不再限制弹题总次数；每次弹题内的选项尝试次数由 handleVideoQuizWork 控制。
+  assert.equal("maxAttempts" in STUDY_SELECTORS.videoQuiz, false);
 });
 
 test("shouldSubmit only allows submission when every question has a valid answer", () => {

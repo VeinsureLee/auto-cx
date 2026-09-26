@@ -1,6 +1,5 @@
 import { handleVideoQuizWork, isVideoQuizVisible } from "./quiz.mjs";
-import { STUDY_SELECTORS } from "./study-selectors.mjs";
-import { startMediaPlayback, waitForMediaTarget } from "./task-point.mjs";
+import { startMediaPlayback, waitForMediaTaskCompletion } from "./task-point.mjs";
 
 class VideoPlaybackError extends Error {
   constructor(message, { blocked = false } = {}) {
@@ -13,34 +12,50 @@ class VideoPlaybackError extends Error {
 export async function playManifestVideo({
   frame,
   config,
+  readTaskPoint = null,
+  completionSyncTimeoutMs,
   onProgress = async () => {},
   onPopupQuiz = async () => {},
   deps = {},
 }) {
   const {
     startMediaPlayback: runStartMediaPlayback = startMediaPlayback,
-    waitForMediaTarget: runWaitForMediaTarget = waitForMediaTarget,
+    waitForMediaTaskCompletion: runWaitForMediaTaskCompletion = waitForMediaTaskCompletion,
     isVideoQuizVisible: checkVideoQuizVisible = isVideoQuizVisible,
     handleVideoQuizWork: runHandleVideoQuizWork = handleVideoQuizWork,
   } = deps;
 
   await runStartMediaPlayback(frame, "video", { speed: config.videoSpeed });
-  let popupAttempts = 0;
 
-  const result = await runWaitForMediaTarget(frame, "video", config.timeoutMs, {
+  // 弹题序号只用于展示，不再限制整段视频的弹题总次数；
+  // 单次弹题内的选项尝试次数仍由 handleVideoQuizWork 控制。
+  let popupSequence = 0;
+  let popupWasVisible = false;
+
+  const waitOptions = {
     // 不再传 targetPercent：默认自然播到 100%，完成判定交给任务点状态。
     speed: config.videoSpeed,
+    readTaskPoint,
     onSample: onProgress,
     onTick: async () => {
-      if (!(await checkVideoQuizVisible(frame))) {
+      const visible = await checkVideoQuizVisible(frame);
+      if (!visible) {
+        // 弹题已关闭：重置标记，下一次出现视为新的弹题。
+        popupWasVisible = false;
         return false;
       }
-      if (popupAttempts >= STUDY_SELECTORS.videoQuiz.maxAttempts) {
-        throw new VideoPlaybackError("视频弹题连续出现且超过处理上限", { blocked: true });
+      if (popupWasVisible) {
+        // 同一弹题仍处于打开状态，避免重复处理。
+        return false;
       }
 
-      popupAttempts += 1;
-      await onPopupQuiz({ status: "handling", detail: "正在处理视频弹题" });
+      popupWasVisible = true;
+      popupSequence += 1;
+      await onPopupQuiz({
+        status: "handling",
+        sequence: popupSequence,
+        detail: "正在处理视频弹题",
+      });
       const quizResult = await runHandleVideoQuizWork({ frame, config }).catch((error) => ({
         status: "error",
         detail: error.message ?? String(error),
@@ -52,11 +67,21 @@ export async function playManifestVideo({
           blocked: true,
         });
       }
+      // 处理完成后确认弹题确实关闭，再重置标记以识别下一次弹题。
+      if (!(await checkVideoQuizVisible(frame))) {
+        popupWasVisible = false;
+      }
       return true;
     },
-  });
+  };
+  if (completionSyncTimeoutMs !== undefined) {
+    waitOptions.completionSyncTimeoutMs = completionSyncTimeoutMs;
+  }
 
-  if (result.status !== "reached_target") {
+  const result = await runWaitForMediaTaskCompletion(frame, "video", config.timeoutMs, waitOptions);
+
+  // 平台任务点已判定完成（task_completed）或自然播完（reached_target）均视为成功。
+  if (result.status !== "task_completed" && result.status !== "reached_target") {
     throw new VideoPlaybackError(result.detail || "视频未达到目标进度", {
       blocked: result.status === "skipped",
     });

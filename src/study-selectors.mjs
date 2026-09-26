@@ -37,7 +37,6 @@ export const STUDY_SELECTORS = {
     wrongMark: "#spanNot",
     wrongBackMark: "#spanNotBack",
     resultMarks: ["#spanHas", "#spanNotBack", "#spanNot"],
-    maxAttempts: 3,
   },
 
   // 任务点完成状态（只读取任务标签或其关联 DOM，不点击、不改播放进度）。
