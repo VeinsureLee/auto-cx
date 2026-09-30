@@ -74,6 +74,17 @@ export const STUDY_SELECTORS = {
     fillInput: 'input[type="text"], input[type="number"], input[type="tel"]',
     essayTextarea: "textarea",
     submitButton: ".btnSubmit, .btnSub, .submitBtn",
+    // 提交按钮旁边的「暂时保存」：演练模式只填不交，用它把答案暂存在平台上。
+    saveButton: [
+      "#tempsave",
+      ".tempsave",
+      ".btnSave",
+      ".saveBtn",
+      'input[value*="保存"]',
+      'a:has-text("暂时保存")',
+      'span:has-text("暂时保存")',
+      'a:has-text("保存草稿")',
+    ].join(", "),
     confirmButton: "#confirmSubWin a.bluebtn, #confirmSubWin .bluebtn, #popok",
     captchaWindow: "#verifyCodeWin",
     captchaInput: "#inputCode",

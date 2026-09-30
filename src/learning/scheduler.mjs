@@ -18,7 +18,9 @@ export function selectEligibleLessons({
     .filter((lesson) => {
       const id = String(lesson.knowledgeId ?? "");
       if (!id || activeIds.has(id) || attemptedIds.has(id)) return false;
-      if (lesson.completed || isLockedLesson(lesson)) return false;
+      if (isLockedLesson(lesson)) return false;
+      // 该不该做统一由 lessonNeedsWork 决定（它内部已经排除「目录已完成」的课节），
+      // 这里不再重复判断目录的 completed 标志，以免两处口径不一致。
       const memoLesson = memoLessons.find((candidate) => String(candidate.knowledgeId) === id);
       return Boolean(memoLesson && lessonNeedsWork(memoLesson, {
         phase,

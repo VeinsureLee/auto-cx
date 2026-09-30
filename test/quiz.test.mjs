@@ -92,6 +92,60 @@ test("collectQuestions runs its text normalization inside the page evaluation co
   assert.deepEqual(question.options, [{ data: "", text: "“第一本护照”" }]);
 });
 
+test("collectQuestions strips the question number and type label from a fallback stem", async () => {
+  // 判断题往往没有 .qtContent，只能回退到整个标题块，题号（"2 "）和题型标签
+  // （【判断题】）会一起被带出来；题干因此永远匹配不上题库。校验它们被剥掉。
+  const makeElement = ({ textContent = "", children = {}, lists = {} } = {}) => ({
+    textContent,
+    querySelector: (selector) => children[selector] ?? null,
+    querySelectorAll: (selector) => lists[selector] ?? [],
+    getAttribute: () => null,
+  });
+  const makeBlock = (titleText) =>
+    makeElement({
+      children: {
+        ".Zy_TItle": makeElement({
+          textContent: titleText,
+          children: {
+            ".qtContent": null,
+            ".newZy_TItle": makeElement({ textContent: "" }),
+            p: null,
+          },
+        }),
+      },
+      lists: { "ul.Zy_ulTop li": [] },
+    });
+
+  const blocks = [
+    makeBlock("2 【判断题】150定律是指，根据推断，人类智力将允许人类拥有稳定社交网络的人数是148人。"),
+    makeBlock("150定律是指，根据推断，人类智力将允许人类拥有稳定社交网络的人数是148人。"),
+    makeBlock("2. 创业的含义可分为哪几种（）"),
+    makeBlock("（单选题）创业的含义可分为哪几种（）"),
+  ];
+  const frame = {
+    locator: () => ({
+      evaluateAll: (callback, selectors) =>
+        Function("callback", "blocks", "selectors", "return (" + callback.toString() + ")(blocks, selectors);")(
+          callback,
+          blocks,
+          selectors,
+        ),
+    }),
+  };
+
+  const questions = await collectQuestions(frame);
+  assert.deepEqual(
+    questions.map((question) => question.stem),
+    [
+      "150定律是指，根据推断，人类智力将允许人类拥有稳定社交网络的人数是148人。",
+      // 题干本身就带数字时必须原样保留，不能把 "150" 当题号剥掉。
+      "150定律是指，根据推断，人类智力将允许人类拥有稳定社交网络的人数是148人。",
+      "创业的含义可分为哪几种（）",
+      "创业的含义可分为哪几种（）",
+    ],
+  );
+});
+
 test("classifyQuestionType detects multi from checkboxes", () => {
   assert.equal(
     classifyQuestionType({ checkboxCount: 2 }),

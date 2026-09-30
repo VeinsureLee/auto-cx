@@ -1,3 +1,5 @@
+import { resolveBankAnswers } from "./question-bank.mjs";
+
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 export function buildPrompt(questions, trials = []) {
@@ -196,38 +198,143 @@ export function normalizeAnswer(answer) {
   return null;
 }
 
-export async function answerQuestions(questions, config, { trials = [] } = {}) {
+// 解析模型返回的答案文本；无法解析时返回 null（区别于「解析成功但没有合法答案」）。
+function extractAnswers(content) {
+  let parsed = parseLlmJson(content);
+  if (!Array.isArray(parsed)) {
+    if (parsed && typeof parsed === "object") {
+      parsed = Array.isArray(parsed.answers) ? parsed.answers : [parsed];
+    } else {
+      return null;
+    }
+  }
+  return parsed.map(normalizeAnswer).filter(Boolean);
+}
+
+function answersByIndex(answers) {
+  const indexed = new Map();
+  for (const answer of Array.isArray(answers) ? answers : []) {
+    const index = Number(answer?.index);
+    if (Number.isInteger(index) && index >= 1 && !indexed.has(index)) {
+      indexed.set(index, answer);
+    }
+  }
+  return indexed;
+}
+
+// 试错表里的题号是完整数组下标，而发给模型的题目子集会被重新编号成 1..k。
+// 必须同步重映射、并丢弃引用了子集之外题目的条目，否则模型会照着原始题号
+// 作答，指到 prompt 里根本没出现过的题目上。
+function remapTrials(trials, positionByIndex) {
+  const remapOne = (answer) => {
+    const position = positionByIndex.get(Number(answer?.index));
+    return position ? { ...answer, index: position } : null;
+  };
+  const remapped = [];
+  for (const trial of Array.isArray(trials) ? trials : []) {
+    if (Array.isArray(trial)) {
+      const group = trial.map(remapOne).filter(Boolean);
+      if (group.length) {
+        remapped.push(group);
+      }
+      continue;
+    }
+    const item = remapOne(trial);
+    if (item) {
+      remapped.push(item);
+    }
+  }
+  return remapped;
+}
+
+export async function answerQuestions(
+  questions,
+  config,
+  { trials = [], fallbackAnswers = null, questionBank = null } = {},
+) {
   if (!questions?.length) {
     return { answers: [], partial: false, note: "没有需要作答的题目" };
   }
 
-  const result = await callChatCompletions(buildPrompt(questions, trials), config);
-  if (!result.ok) {
-    return { answers: [], partial: true, note: result.note };
+  // 本地题库优先：判定为 100% 正确、且没被平台判错过的题目直接照抄，不再询问模型。
+  const banked = resolveBankAnswers(questions, questionBank ?? [], { trials });
+  const answers = [...banked.answers];
+  const notes = [];
+  if (banked.answers.length) {
+    notes.push(`题库命中 ${banked.answers.length}/${questions.length} 题`);
+  }
+  if (banked.exclusions.length) {
+    notes.push(`已排除题库作答未满分的答案 ${banked.exclusions.length} 题`);
+  }
+  for (const note of new Set(banked.notes)) {
+    notes.push(note);
   }
 
-  let parsed = parseLlmJson(result.content);
-  if (!Array.isArray(parsed)) {
-    if (parsed && typeof parsed === "object") {
-      if (Array.isArray(parsed.answers)) {
-        parsed = parsed.answers;
-      } else {
-        parsed = [parsed];
-      }
+  // 题库没覆盖的题目先复用上次保存的答案（如 dry-run 落盘的答案），剩下的才问模型。
+  const saved = answersByIndex(fallbackAnswers);
+  const pending = [];
+  for (const item of banked.unresolved) {
+    const previous = saved.get(item.index);
+    if (previous) {
+      answers.push(previous);
+      continue;
+    }
+    pending.push(item);
+  }
+  const reused = banked.unresolved.length - pending.length;
+  if (reused) {
+    notes.push(`复用上次答案 ${reused} 题`);
+  }
+  if (pending.length) {
+    notes.push(`模型作答 ${pending.length} 题`);
+  }
+
+  if (pending.length) {
+    // 只把题库未覆盖的题目发给模型，因此返回的下标需要映射回原始题号；
+    // 试错表也要换算成子集内的编号。
+    const positionByIndex = new Map(pending.map((item, position) => [item.index, position + 1]));
+    const result = await callChatCompletions(
+      buildPrompt(
+        pending.map((item) => item.question),
+        remapTrials([...(Array.isArray(trials) ? trials : []), ...banked.exclusions], positionByIndex),
+      ),
+      config,
+    );
+
+    if (!result.ok) {
+      notes.push(result.note);
     } else {
-      return { answers: [], partial: true, note: "无法解析 AI 返回的答案 JSON" };
+      const extracted = extractAnswers(result.content);
+      if (extracted === null) {
+        notes.push("无法解析 AI 返回的答案 JSON");
+      } else {
+        const remapped = extracted
+          .map((answer) => {
+            const target = pending[answer.index - 1];
+            return target ? { ...answer, index: target.index } : null;
+          })
+          .filter(Boolean);
+        answers.push(...remapped);
+        if (extracted.length > remapped.length) {
+          notes.push(`模型返回了 ${extracted.length - remapped.length} 条越界答案，已丢弃`);
+        }
+      }
     }
   }
 
-  const answers = parsed.map(normalizeAnswer).filter(Boolean);
   const answeredIndexes = new Set(answers.map((answer) => answer.index));
-  const requestedIndexes = questions.map((question, index) => index + 1);
-  const missing = requestedIndexes.filter((index) => !answeredIndexes.has(index));
+  const missing = questions
+    .map((question, index) => index + 1)
+    .filter((index) => !answeredIndexes.has(index));
   const partial = missing.length > 0;
+  if (partial) {
+    notes.push(`仍有 ${missing.join("、")} 题未获得答案`);
+  }
 
   return {
-    answers,
+    answers: [...answers].sort((left, right) => left.index - right.index),
     partial,
-    note: partial ? `仍有 ${missing.join("、")} 题未获得答案` : null,
+    note: notes.join("；") || null,
+    diagnostics: banked.diagnostics,
   };
 }

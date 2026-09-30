@@ -16,12 +16,20 @@ function catalog(id, { locked = false, completed = false } = {}) {
   };
 }
 
-function memo(id, { video = "pending", homework = "pending" } = {}) {
+function memo(id, { video = "pending", homework = "pending", answers = 0, catalogCompleted = false } = {}) {
   return {
     knowledgeId: id,
     section: id,
+    catalogCompleted,
     video: { status: video },
-    homework: { status: homework },
+    homework: {
+      status: homework,
+      lastAnswers: Array.from({ length: answers }, (_, index) => ({
+        index: index + 1,
+        type: "judge",
+        trueFalse: true,
+      })),
+    },
   };
 }
 
@@ -37,6 +45,32 @@ test("selectEligibleLessons excludes locked, active, attempted, and completed le
     limit: 3,
   });
   assert.deepEqual(selected, []);
+});
+
+test("目录已完成的课节不会被选中，无论作业是什么状态", () => {
+  const selected = selectEligibleLessons({
+    catalogLessons: [
+      catalog("1.1", { completed: true }),
+      catalog("1.2", { completed: true }),
+      catalog("1.3", { completed: true }),
+      catalog("1.4", { completed: true }),
+      // 对照：目录未完成的正常参与挑选。
+      catalog("1.5"),
+    ],
+    memoLessons: [
+      // 演练点过「暂时保存」留下的草稿：平台算作已完成，同样不重做。
+      memo("1.1", { homework: "dry_run", answers: 2, catalogCompleted: true }),
+      memo("1.2", { homework: "pending", answers: 2, catalogCompleted: true }),
+      memo("1.3", { homework: "submitted", answers: 2, catalogCompleted: true }),
+      memo("1.4", { homework: "failed", answers: 2, catalogCompleted: true }),
+      memo("1.5", { homework: "pending", catalogCompleted: false }),
+    ],
+    queries: ["1"],
+    phase: "homework",
+    dryRun: false,
+    limit: 5,
+  });
+  assert.deepEqual(selected.map((lesson) => lesson.knowledgeId), ["1.5"]);
 });
 
 test("runDynamicWorkerPool never exceeds concurrency and refills released slots", async () => {

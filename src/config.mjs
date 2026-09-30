@@ -9,6 +9,8 @@ const DEFAULT_PROGRESS_CONCURRENCY = 2;
 const DEFAULT_STUDY_CONCURRENCY = 1;
 const DEFAULT_LLM_MODEL = "deepseek-chat";
 const DEFAULT_LLM_BASE_URL = "https://api.deepseek.com";
+const DEFAULT_QUESTION_BANK_PATH = "课后题库.md";
+const DEFAULT_ANSWER_LOG_PATH = "artifacts/answer-diagnostics.log";
 // Retained only so older .env files continue to parse; playback no longer uses it.
 const DEFAULT_VIDEO_TARGET_PERCENT = 100;
 const DEFAULT_VIDEO_COMPLETION_SYNC_TIMEOUT_MS = 15_000;
@@ -175,8 +177,17 @@ export function readConfig(env = process.env, cwd = process.cwd(), options = {})
     cwd,
     firstNonEmpty(env.CHAOXING_STUDY_MEMO_MARKDOWN_PATH) ?? "artifacts/study-memo.md",
   );
+  const questionBankPath = path.resolve(
+    cwd,
+    firstNonEmpty(env.CHAOXING_QUESTION_BANK_PATH) ?? DEFAULT_QUESTION_BANK_PATH,
+  );
+  const answerLogPath = path.resolve(
+    cwd,
+    firstNonEmpty(env.CHAOXING_ANSWER_LOG_PATH) ?? DEFAULT_ANSWER_LOG_PATH,
+  );
 
   return {
+    answerLogPath,
     baseUrl,
     browserChannel: firstNonEmpty(env.CHAOXING_BROWSER_CHANNEL) ?? "chrome",
     browserPath: firstNonEmpty(env.CHAOXING_BROWSER_PATH),
@@ -191,6 +202,7 @@ export function readConfig(env = process.env, cwd = process.cwd(), options = {})
     progressConcurrency: parseProgressConcurrency(env.CHAOXING_PROGRESS_CONCURRENCY),
     progressMarkdownPath,
     progressPath,
+    questionBankPath,
     storageStatePath,
     studyCourses: parseList(env.CHAOXING_STUDY_COURSES),
     studyConcurrency: options.studyConcurrencyOverride === undefined
