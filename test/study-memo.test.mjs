@@ -96,6 +96,25 @@ test("lessonNeedsWork treats dry_run as pending when submitting for real", () =>
   });
 });
 
+test("目录已完成的课节一律不重做", () => {
+  const memo = createStudyMemo({ courses: [course] });
+  refreshCatalog(memo, course, [catalogLesson({ knowledgeId: "a", catalogCompleted: true })]);
+  const lesson = memo.courses[0].lessons[0];
+
+  // 演练点过「暂时保存」的草稿也会让平台把这一节算作目录已完成 —— 同样不重做。
+  for (const status of ["dry_run", "pending", "submitted", "failed"]) {
+    setLessonHomework(memo, course, lesson, {
+      status,
+      lastAnswers: [{ index: 1, type: "judge", trueFalse: true }],
+    });
+    assert.deepEqual(
+      lessonNeedsWork(lesson, { phase: "homework", submitDryRun: true }),
+      { video: false, homework: false, any: false },
+      `目录已完成时不该重做（作业状态 ${status}）`,
+    );
+  }
+});
+
 test("lessonStatusLabel reports completed, locked, done, and failed states", () => {
   const memo = createStudyMemo({ courses: [course] });
   refreshCatalog(memo, course, [

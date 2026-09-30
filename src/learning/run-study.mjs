@@ -1,6 +1,9 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 import { config as loadDotenv } from "dotenv";
 import { chromium } from "playwright-core";
+import { parseQuestionBank } from "../assessment/question-bank.mjs";
 import { readConfig } from "../config.mjs";
 import { StudyMemoStore, makeCourseKey } from "../persistence/memo.mjs";
 import { buildStudyReport } from "../persistence/report-builder.mjs";
@@ -22,6 +25,24 @@ function lessonWorkerSuffix(lessonsQuery) {
   const joined = (lessonsQuery ?? []).map(String).join(",");
   const sanitized = joined.replace(/[^\w.\-~]+/g, "-").replace(/^-+|-+$/g, "");
   return sanitized || "all";
+}
+
+// 本地题库：命中且判定为 100% 正确的题目直接照抄，不再询问模型。
+// 文件缺失或读不出来时退化为空题库（全部交给模型），不影响原有流程。
+async function loadQuestionBank(config, log = () => {}) {
+  if (!config.questionBankPath) {
+    return [];
+  }
+  try {
+    const { entries } = parseQuestionBank(await readFile(config.questionBankPath, "utf8"));
+    log(`题库已加载：${entries.length} 道题（${path.relative(process.cwd(), config.questionBankPath)}）`);
+    return entries;
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      log(`题库读取失败（${error.message}），本次作答全部交给模型`);
+    }
+    return [];
+  }
 }
 
 export async function runStudy({
@@ -65,6 +86,8 @@ export async function runStudy({
       if (browser) void browser.close().catch(() => {});
     },
   });
+  // 解析一次、全流程共用；挂在 config 上随现有的参数链一路传到作业作答处。
+  resolvedConfig.questionBank = await loadQuestionBank(resolvedConfig, (message) => progress.log(message));
   try {
     browser = await chromium.launch({
       headless: resolvedConfig.headless,

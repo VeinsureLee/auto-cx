@@ -231,6 +231,8 @@ export function lessonNeedsVideo(lesson) {
 }
 
 export function lessonNeedsHomework(lesson, { submitDryRun = false } = {}) {
+  // 目录已完成的课节一律不重做 —— 平台认为它完成了，包括演练点过「暂时保存」
+  // 留下草稿的那些；用户已确认这些不需要回头覆盖。
   return !lesson.catalogCompleted && homeworkNeedsWork(lesson.homework, { submitDryRun });
 }
 

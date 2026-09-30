@@ -1,5 +1,9 @@
+import path from "node:path";
+import process from "node:process";
+
 import { detectQuizSubmissionState, handleQuizWork } from "../assessment/chapter-quiz.mjs";
 import { homeworkNeedsWork, makeCourseKey, setLessonHomework, setLessonVideo, videoNeedsWork } from "../persistence/memo.mjs";
+import { appendAnswerDiagnostics } from "../persistence/diagnostic-log.mjs";
 import { clickTaskTab, discoverLessonTasks, waitForTaskSurface } from "../platform/task-manifest.mjs";
 import { readTaskPointState } from "../platform/task-point-status.mjs";
 import { playManifestVideo } from "../video/runner.mjs";
@@ -203,7 +207,11 @@ async function handleHomeworkTask({
       platformState = "unknown";
     }
 
-    if (platformState === "submitted") {
+    // 演练点过「暂时保存」的草稿，平台会把这道题也显示成已提交，但那是草稿不是真
+    // 提交。这种课节照常重新作答（正式运行会真正提交），否则草稿永远覆盖不掉。
+    // 「目录已完成」的章节不会走到这里 —— 候选阶段就排除了。
+    const draftOnly = memoLesson.homework?.status === "dry_run";
+    if (platformState === "submitted" && !draftOnly) {
       await store.mutate((state) =>
         setLessonHomework(state, course, lesson, {
           status: "pending",
@@ -243,8 +251,9 @@ async function handleHomeworkTask({
         page,
         config,
         dryRun,
-        // 第一次尝试复用 dry-run 保存的答案；重试时由大模型结合试错表重新生成。
-        precomputedAnswers: attempts === 0 && !dryRun ? savedAnswers : null,
+        // 第一次尝试优先用本地题库与 dry-run 保存的答案；重试时由大模型结合试错表重新生成。
+        fallbackAnswers: attempts === 0 && !dryRun ? savedAnswers : null,
+        questionBank: config.questionBank ?? null,
         trials,
         beforeSubmit: async () => {
           progress.stage(slot, { name: "homework", taskTitle: task.title, detail: "正在提交作业" });
@@ -256,6 +265,33 @@ async function handleHomeworkTask({
         continue;
       }
       result = { status: "error", detail: error.message ?? String(error) };
+    }
+
+    // 题库没能直接用上的题，把页面实际抓到的内容写进诊断日志：题干为空、题型识别
+    // 不出来、题干被换字，表现都是「没命中题库」，但修法完全不同，只有现场数据能
+    // 分辨。终端会被进度条重绘冲掉，所以明细一律落盘，屏幕上只留一行指路。
+    if (attempts === 0 && Array.isArray(result.diagnostics) && result.diagnostics.length) {
+      progress.log(
+        `      题库未命中 ${result.diagnostics.length} 题，现场明细见 ${path.relative(process.cwd(), config.answerLogPath) || config.answerLogPath}`,
+      );
+    }
+    if (Array.isArray(result.diagnostics) && result.diagnostics.length) {
+      await appendAnswerDiagnostics(config.answerLogPath, [
+        `[${new Date().toISOString()}] ${course.name} / ${lesson.title} / ${task.title}（第 ${attempts + 1} 次作答）`,
+        ...result.diagnostics.flatMap((item) => {
+          const reason = item.matched
+            ? "题干已命中题库，但题型或选项对不上"
+            : item.nearestStem
+              ? `题库最相近「${item.nearestStem}」相似度 ${item.similarity.toFixed(2)}`
+              : "题库里没有同题型的条目可比";
+          return [
+            `  第${item.index}题[${item.type}] 选项${item.optionCount}个｜题干${item.stem.length}字「${item.stem || "（空）"}」｜${reason}`,
+            ...(item.options.length
+              ? [`    选项：${item.options.map((text) => `「${text}」`).join(" ")}`]
+              : []),
+          ];
+        }),
+      ]);
     }
 
     if (result.reanswer) {
@@ -285,6 +321,9 @@ async function handleHomeworkTask({
       trials,
     };
     const taskSucceeded = ["submitted", "dry_run"].includes(status);
+    if (taskSucceeded && result.detail) {
+      progress.log(`      作业“${task.title}”${result.detail}`);
+    }
     if (["submitted", "dry_run"].includes(status) && Array.isArray(result.answers)) {
       patch.lastAnswers = result.answers;
     }

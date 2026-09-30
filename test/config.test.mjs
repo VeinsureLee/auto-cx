@@ -122,6 +122,42 @@ test("readConfig supports the DeepSeek key aliases and custom study paths", () =
   assert.equal(config.videoRetryLimit, 4);
 });
 
+test("readConfig resolves the question bank path with a default and an override", () => {
+  const defaults = readConfig(
+    { PhoneNumber: "13800138000", Password: "secret" },
+    "C:\\workspace",
+  );
+  assert.equal(defaults.questionBankPath, path.resolve("C:\\workspace", "课后题库.md"));
+
+  const overridden = readConfig(
+    {
+      PhoneNumber: "13800138000",
+      Password: "secret",
+      CHAOXING_QUESTION_BANK_PATH: "data/bank.md",
+    },
+    "C:\\workspace",
+  );
+  assert.equal(overridden.questionBankPath, path.resolve("C:\\workspace", "data/bank.md"));
+});
+
+test("readConfig resolves the answer diagnostics log path", () => {
+  const defaults = readConfig(
+    { PhoneNumber: "13800138000", Password: "secret" },
+    "C:\\workspace",
+  );
+  assert.equal(defaults.answerLogPath, path.resolve("C:\\workspace", "artifacts/answer-diagnostics.log"));
+
+  const overridden = readConfig(
+    {
+      PhoneNumber: "13800138000",
+      Password: "secret",
+      CHAOXING_ANSWER_LOG_PATH: "logs/answers.log",
+    },
+    "C:\\workspace",
+  );
+  assert.equal(overridden.answerLogPath, path.resolve("C:\\workspace", "logs/answers.log"));
+});
+
 test("readConfig falls back to the bare DEEPSEEK_API_KEY name", () => {
   const config = readConfig({
     DEEPSEEK_API_KEY: "sk-bare",

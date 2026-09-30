@@ -129,6 +129,17 @@ export async function collectQuestions(frame) {
           normalize(value).replace(/^(?:\([A-Za-z0-9]\)|[A-Za-z0-9][.、)）])\s*/, "");
         const normalizeOptionLabel = (marker, content) =>
           normalizeOptionText(`${normalize(marker)} ${normalize(content)}`);
+        // 题型标签（【判断题】/（单选题）之类）不参与题干，但保留它后面的题干正文。
+        const TYPE_LABEL = /^(?:【[^】]*】|[（(]\s*(?:单选|多选|判断|填空|简答)题\s*[）)])\s*/;
+        // 拿不到 .qtContent 时只能回退到整个标题块，会把题号（"2 "）和题型标签
+        // 一起带进来，题干会变成「2 【判断题】…」而永远匹配不上题库；这里剥掉它们。
+        const stripStemPrefix = (value) => {
+          let text = value;
+          text = text.replace(/^\d{1,3}\s*[.、)）]\s*/, "");
+          text = text.replace(/^\d{1,3}\s*(?=【|[（(]\s*(?:单选|多选|判断|填空|简答)题)/, "");
+          text = text.replace(TYPE_LABEL, "");
+          return text.trim();
+        };
 
         return blocks.map((block) => {
           const qtypeValue = block.getAttribute("data");
@@ -138,9 +149,9 @@ export async function collectQuestions(frame) {
           const rawStem = normalize(
             stemContentElement?.textContent || stemElement?.querySelector(stemTextSel)?.textContent || stemElement?.textContent,
           );
-          const stem = rawStem.startsWith(stemLabel)
-            ? rawStem.slice(stemLabel.length).trim()
-            : rawStem;
+          const stem = stripStemPrefix(
+            rawStem.startsWith(stemLabel) ? rawStem.slice(stemLabel.length).trim() : rawStem,
+          );
 
           const options = [];
           const optionItems = block.querySelectorAll(optionSel);
@@ -337,6 +348,17 @@ async function findClickableButton(frame, selector, timeoutMs = 10_000) {
   return null;
 }
 
+// 演练模式不提交，但尽量把填好的答案留在平台上：点「暂时保存」，它只存草稿、不判分。
+// 找不到按钮不算失败——答案照样会写进备忘录，下次正式运行复用。
+async function saveDraftAnswers(frame) {
+  const saveButton = await findClickableButton(frame, QUIZ.saveButton, 3_000);
+  if (!saveButton) {
+    return "，未找到“暂时保存”按钮（草稿未留在平台）";
+  }
+  await saveButton.click({ force: true }).catch(() => saveButton.click());
+  return "，已点“暂时保存”把草稿留在平台";
+}
+
 async function findButtonAcrossFrames(page, selector, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -397,7 +419,8 @@ export async function handleQuizWork({
   config,
   dryRun,
   beforeSubmit,
-  precomputedAnswers = null,
+  fallbackAnswers = null,
+  questionBank = null,
   trials = [],
 }) {
   await frame
@@ -410,21 +433,18 @@ export async function handleQuizWork({
     return { status: "skipped", detail: "测验帧中未识别到题目", answers: [] };
   }
 
-  // 允许复用已保存的答案（如 dry-run 阶段落盘的答案），不再重新调用大模型。
-  let answers;
-  let partial = false;
-  let note = null;
-  if (Array.isArray(precomputedAnswers) && precomputedAnswers.length) {
-    answers = precomputedAnswers;
-  } else {
-    const generated = await answerQuestions(questions, config, { trials });
-    answers = generated.answers;
-    partial = generated.partial;
-    note = generated.note;
-    if (!answers.length && partial) {
-      return { status: "skipped", detail: note, answers: [] };
-    }
+  // 答案优先级：本地题库判定正确的题目 → 上次保存的答案（如 dry-run 落盘的）
+  // → 剩下的才调用大模型，并把题库判定错误的答案作为试错记录让模型避开。
+  const generated = await answerQuestions(questions, config, {
+    trials,
+    fallbackAnswers,
+    questionBank,
+  });
+  const { answers, partial, note, diagnostics } = generated;
+  if (!answers.length && partial) {
+    return { status: "skipped", detail: note, answers: [], diagnostics };
   }
+  const suffix = note ? `（${note}）` : "";
 
   await fillAnswers(frame, questions, answers);
 
@@ -432,18 +452,23 @@ export async function handleQuizWork({
     const unanswered = questions
       .map((_, index) => index + 1)
       .filter((index) => !answers.some((answer) => answer.index === index));
+    const saved = await saveDraftAnswers(frame);
     return {
       status: "dry-run",
-      detail: `已填入 ${answers.length}/${questions.length} 题答案，未提交；${unanswered.length ? `未作答：${unanswered.join("、")}` : "全部有答案"}`,
+      detail: `已填入 ${answers.length}/${questions.length} 题答案，未提交${saved}；${unanswered.length ? `未作答：${unanswered.join("、")}` : "全部有答案"}${suffix}`,
       answers,
+      diagnostics,
     };
   }
 
   if (!shouldSubmit(questions, answers)) {
     return {
       status: "skipped",
-      detail: partial ? `部分题目未获得答案（${note}），未提交` : "存在无法自动作答的题型，未提交",
+      detail: partial
+        ? `部分题目未获得答案（${note}），未提交`
+        : `存在无法自动作答的题型，未提交${suffix}`,
       answers,
+      diagnostics,
     };
   }
 
@@ -496,8 +521,9 @@ export async function handleQuizWork({
   }
   return {
     status: "answered",
-    detail: `已提交 ${questions.length} 题答案`,
+    detail: `已提交 ${questions.length} 题答案${suffix}`,
     answers,
+    diagnostics,
     submissionStarted: true,
   };
 }
